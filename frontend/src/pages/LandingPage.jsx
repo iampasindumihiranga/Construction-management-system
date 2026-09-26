@@ -15,6 +15,7 @@ export default function LandingPage() {
   const [selectedCategory, setSelectedCategory] = useState('RESIDENCIES');
   const [selectedProject, setSelectedProject] = useState(null);
 
+  const [inquiryTargetProject, setInquiryTargetProject] = useState(null);
   const [inquiryModalOpen, setInquiryModalOpen] = useState(false);
   const [inquirySubmitting, setInquirySubmitting] = useState(false);
   const [inquirySuccessMsg, setInquirySuccessMsg] = useState('');
@@ -28,12 +29,13 @@ export default function LandingPage() {
   });
 
   const openInquiryModal = (proj) => {
+    setInquiryTargetProject(proj);
     setInquiryForm({
       name: user?.name || '',
-      email: user?.email || '',
+      email: user?.email || (user?.username?.includes('@') ? user.username : ''),
       phone: user?.phone || '',
       subject: `Official Inquiry: ${proj.name}`,
-      message: `I would like to receive official details and consultation regarding the design and specifications for ${proj.name}.`,
+      message: '',
     });
     setInquiryErrorMsg('');
     setInquirySuccessMsg('');
@@ -42,7 +44,7 @@ export default function LandingPage() {
 
   const handleSendOfficialInquiry = async (e) => {
     e.preventDefault();
-    if (!selectedProject) return;
+    if (!inquiryTargetProject) return;
     if (!inquiryForm.name.trim() || !inquiryForm.email.trim() || !inquiryForm.message.trim()) {
       setInquiryErrorMsg('Please fill in your name, email address, and inquiry message.');
       return;
@@ -54,8 +56,8 @@ export default function LandingPage() {
         client: user?.role === 'CLIENT'
           ? { id: user.clientId || user.id, name: inquiryForm.name.trim(), email: inquiryForm.email.trim(), phone: inquiryForm.phone.trim() }
           : { name: inquiryForm.name.trim(), email: inquiryForm.email.trim(), phone: inquiryForm.phone.trim() },
-        project: { id: selectedProject.id },
-        subject: inquiryForm.subject.trim() || `Official Inquiry: ${selectedProject.name}`,
+        project: { id: inquiryTargetProject.id },
+        subject: inquiryForm.subject.trim() || `Official Inquiry: ${inquiryTargetProject.name}`,
         message: inquiryForm.message.trim(),
       };
       await createInquiry(payload);
@@ -63,6 +65,7 @@ export default function LandingPage() {
       setTimeout(() => {
         setInquiryModalOpen(false);
         setInquirySuccessMsg('');
+        setInquiryTargetProject(null);
       }, 2500);
     } catch (err) {
       setInquiryErrorMsg(err.message || 'Failed to send official inquiry. Please try again.');
@@ -181,11 +184,7 @@ export default function LandingPage() {
         selectedCategory={selectedCategory}
         onSelectCategory={(cat) => setSelectedCategory(cat)}
         onInquire={(proj) => {
-          if (user?.role === 'CLIENT') {
-            navigate(`/client?inquire=${proj.id}`);
-          } else {
-            navigate('/login');
-          }
+          openInquiryModal(proj);
         }}
         onSelectProject={(proj) => {
           setSelectedProject(proj);
@@ -302,15 +301,6 @@ export default function LandingPage() {
                     {selectedProject.priceRange || (selectedProject.budget ? formatMoney(selectedProject.budget) : 'Inquire for Price')}
                   </span>
                 </p>
-
-                <button
-                  type="button"
-                  className="btn-solid-green"
-                  style={{ padding: '0.8rem 1.8rem', fontSize: '1rem', fontWeight: 700 }}
-                  onClick={() => openInquiryModal(selectedProject)}
-                >
-                  Send Official Inquiry
-                </button>
               </div>
             </div>
           </div>
@@ -318,7 +308,7 @@ export default function LandingPage() {
       )}
 
       {/* Official Inquiry Submission Modal */}
-      {inquiryModalOpen && selectedProject && (
+      {inquiryModalOpen && inquiryTargetProject && (
         <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
           <div
             className="light-modal-box"
@@ -331,10 +321,10 @@ export default function LandingPage() {
           >
             <div className="modal-head-row">
               <div>
-                <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL INQUIRY</span>
-                <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Inquire: {selectedProject.name}</h3>
+                <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL INQUIRY TO CLIENT MANAGER</span>
+                <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Inquire: {inquiryTargetProject.name}</h3>
               </div>
-              <button type="button" onClick={() => setInquiryModalOpen(false)}>✕</button>
+              <button type="button" onClick={() => { setInquiryModalOpen(false); setInquiryTargetProject(null); }}>✕</button>
             </div>
 
             {inquirySuccessMsg && (
@@ -417,7 +407,7 @@ export default function LandingPage() {
                 <button
                   type="button"
                   className="btn-outline-green"
-                  onClick={() => setInquiryModalOpen(false)}
+                  onClick={() => { setInquiryModalOpen(false); setInquiryTargetProject(null); }}
                   disabled={inquirySubmitting}
                 >
                   Cancel

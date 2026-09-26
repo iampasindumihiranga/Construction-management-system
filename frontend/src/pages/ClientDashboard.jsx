@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PropertyExplorer from '../components/PropertyExplorer';
@@ -9,6 +10,8 @@ import {
   getProjects,
   getInquiries,
   createInquiry,
+  getProjectRequests,
+  createProjectRequest,
   getDocuments,
   uploadDocument,
   getNotifications,
@@ -105,6 +108,40 @@ export default function ClientDashboard() {
   const [inquiryAttachment, setInquiryAttachment] = useState(null);
   const [sendingInquiry, setSendingInquiry] = useState(false);
 
+  // Dedicated inquiry state for company designs (sent directly to Client Manager)
+  const [designInquiryModalOpen, setDesignInquiryModalOpen] = useState(false);
+  const [designInquiryTarget, setDesignInquiryTarget] = useState(null);
+  const [designInquiryMessage, setDesignInquiryMessage] = useState('');
+  const [sendingDesignInquiry, setSendingDesignInquiry] = useState(false);
+
+  // Request Project feature states (Browse designs, Custom design, Request history)
+  const [searchParams] = useSearchParams();
+  const [projectRequests, setProjectRequests] = useState([]);
+  const [requestProjectMode, setRequestProjectMode] = useState('browse'); // 'browse' | 'custom' | 'history'
+  const [requestCategoryFilter, setRequestCategoryFilter] = useState('ALL');
+
+  const [customRequestForm, setCustomRequestForm] = useState({
+    title: '',
+    category: 'RESIDENCIES',
+    location: '',
+    expectedBudget: '',
+    targetStartDate: '',
+    specifications: '',
+    description: '',
+  });
+  const [customRequestImages, setCustomRequestImages] = useState([]);
+  const [submittingCustomRequest, setSubmittingCustomRequest] = useState(false);
+  const [selectedRequestDetails, setSelectedRequestDetails] = useState(null);
+
+  const [designRequestModal, setDesignRequestModal] = useState(null);
+  const [designRequestForm, setDesignRequestForm] = useState({
+    location: '',
+    targetStartDate: '',
+    customNotes: '',
+    expectedBudget: '',
+  });
+  const [submittingDesignRequest, setSubmittingDesignRequest] = useState(false);
+
   const [docTitle, setDocTitle] = useState('');
   const [docType, setDocType] = useState('KYC_DOCUMENT');
   const [docDesc, setDocDesc] = useState('');
@@ -122,12 +159,12 @@ export default function ClientDashboard() {
   async function loadDashboardData() {
     setLoading(true);
     try {
-      const [allClients, allProjects] = await Promise.all([
+      const [allClients, showcaseProjects] = await Promise.all([
         getClients(),
         getProjects({ marketingOnly: true }),
       ]);
 
-      setAllShowcaseProjects(allProjects);
+      setAllShowcaseProjects(showcaseProjects || []);
 
       let currentClient = null;
       if (user?.clientId) {
@@ -147,24 +184,33 @@ export default function ClientDashboard() {
           preferredCategory: currentClient.preferredCategory || 'RESIDENCIES',
         });
 
-        const myProjects = allProjects.filter((p) => p.client?.id === currentClient.id);
-        setProjects(myProjects);
+        // Load ONLY real construction projects assigned to this client added by Project Manager
+        try {
+          const pmProjects = await getProjects({ clientId: currentClient.id, realOnly: true });
+          setProjects(pmProjects || []);
+        } catch (projErr) {
+          console.warn('Projects fetch failed:', projErr);
+          setProjects([]);
+        }
 
-        const [inqData, docData, notifData, fbData, dpData, summaryData] = await Promise.all([
+        const results = await Promise.allSettled([
           getInquiries(currentClient.id),
           getDocuments({ clientId: currentClient.id }),
           getNotifications(currentClient.id),
           getFeedback(currentClient.id),
           getDownPayments({ clientId: currentClient.id }),
           getPaymentSummary(currentClient.id),
+          getProjectRequests(currentClient.id),
         ]);
 
-        setInquiries(inqData);
-        setDocuments(docData);
-        setNotifications(notifData);
-        setFeedbacks(fbData);
-        setDownPayments(dpData || []);
-        setPaymentSummary(summaryData);
+        const [inqRes, docRes, notifRes, fbRes, dpRes, summaryRes, reqRes] = results;
+        setInquiries(inqRes.status === 'fulfilled' ? inqRes.value || [] : []);
+        setDocuments(docRes.status === 'fulfilled' ? docRes.value || [] : []);
+        setNotifications(notifRes.status === 'fulfilled' ? notifRes.value || [] : []);
+        setFeedbacks(fbRes.status === 'fulfilled' ? fbRes.value || [] : []);
+        setDownPayments(dpRes.status === 'fulfilled' ? dpRes.value || [] : []);
+        setPaymentSummary(summaryRes.status === 'fulfilled' ? summaryRes.value : null);
+        setProjectRequests(reqRes.status === 'fulfilled' ? reqRes.value || [] : []);
       }
       setError('');
     } catch (err) {
@@ -173,6 +219,17 @@ export default function ClientDashboard() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam) {
+      setActiveTab(tabParam);
+      if (tabParam === 'request-project') {
+        const modeParam = searchParams.get('mode');
+        if (modeParam) setRequestProjectMode(modeParam);
+      }
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     loadDashboardData();
@@ -290,6 +347,149 @@ export default function ClientDashboard() {
       setError(err.message || 'Failed to submit inquiry');
     } finally {
       setSendingInquiry(false);
+    }
+  };
+
+  const handleOpenDesignInquiry = (design) => {
+    setDesignInquiryTarget(design);
+    setDesignInquiryMessage(`I would like to receive official details and consultation regarding ${design.name} (${design.category}). Please provide the complete architectural plan, pricing, and next steps.`);
+    setDesignInquiryModalOpen(true);
+  };
+
+  const handleSubmitDesignInquiry = async (e) => {
+    e.preventDefault();
+    if (!clientProfile || !designInquiryTarget || !designInquiryMessage.trim()) return;
+    setSendingDesignInquiry(true);
+    setError('');
+    try {
+      await createInquiry({
+        client: { id: clientProfile.id },
+        project: { id: designInquiryTarget.id },
+        subject: `Company Design Inquiry: ${designInquiryTarget.name}`,
+        message: designInquiryMessage.trim(),
+      });
+      setSuccessMsg(`Your inquiry for "${designInquiryTarget.name}" has been sent directly to the Client Manager!`);
+      setDesignInquiryModalOpen(false);
+      setDesignInquiryTarget(null);
+      setDesignInquiryMessage('');
+      const inqData = await getInquiries(clientProfile.id);
+      setInquiries(inqData);
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err) {
+      setError(err.message || 'Failed to submit inquiry to Client Manager');
+    } finally {
+      setSendingDesignInquiry(false);
+    }
+  };
+
+  const handleAddRequestImages = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    if (customRequestImages.length + files.length > 5) {
+      setError('You can attach up to 5 photos / drawings per project request.');
+      return;
+    }
+    setError('');
+    try {
+      const dataUrls = await Promise.all(files.map((file) => readFileAsDataUrl(file)));
+      setCustomRequestImages((prev) => [...prev, ...dataUrls].slice(0, 5));
+    } catch (err) {
+      setError('Failed to read image files: ' + err.message);
+    }
+  };
+
+  const handleRemoveRequestImage = (idx) => {
+    setCustomRequestImages((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSubmitCustomRequest = async (e) => {
+    e.preventDefault();
+    if (!clientProfile) {
+      setError('Client profile not loaded.');
+      return;
+    }
+    if (!customRequestForm.title.trim() || !customRequestForm.location.trim() || !customRequestForm.description.trim()) {
+      setError('Please provide project title, location, and description.');
+      return;
+    }
+    setSubmittingCustomRequest(true);
+    setError('');
+    try {
+      const payload = {
+        client: { id: clientProfile.id },
+        title: customRequestForm.title.trim(),
+        category: customRequestForm.category,
+        location: customRequestForm.location.trim(),
+        expectedBudget: customRequestForm.expectedBudget ? Number(customRequestForm.expectedBudget) : null,
+        targetStartDate: customRequestForm.targetStartDate || null,
+        specifications: customRequestForm.specifications.trim() || null,
+        description: customRequestForm.description.trim(),
+        imageUrls: customRequestImages,
+      };
+
+      await createProjectRequest(payload);
+      setSuccessMsg('Your custom project request has been submitted to the Client Manager! Our team will review and consult with Project Engineering.');
+      setCustomRequestForm({
+        title: '',
+        category: 'RESIDENCIES',
+        location: '',
+        expectedBudget: '',
+        targetStartDate: '',
+        specifications: '',
+        description: '',
+      });
+      setCustomRequestImages([]);
+      setRequestProjectMode('history');
+      const reqData = await getProjectRequests(clientProfile.id);
+      setProjectRequests(reqData || []);
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err) {
+      setError(err.message || 'Failed to submit custom project request');
+    } finally {
+      setSubmittingCustomRequest(false);
+    }
+  };
+
+  const handleOpenDesignRequest = (design) => {
+    setDesignRequestModal(design);
+    setDesignRequestForm({
+      location: design.location || '',
+      targetStartDate: '',
+      customNotes: `We would like to request this project based on the "${design.name}" company design. Please provide site suitability review, engineering assessment, and quotation.`,
+      expectedBudget: design.budget ? String(design.budget) : '',
+    });
+  };
+
+  const handleSubmitDesignRequest = async (e) => {
+    e.preventDefault();
+    if (!clientProfile || !designRequestModal) return;
+    setSubmittingDesignRequest(true);
+    setError('');
+    try {
+      const payload = {
+        client: { id: clientProfile.id },
+        selectedDesign: { id: designRequestModal.id },
+        title: `Project Request: ${designRequestModal.name}`,
+        category: designRequestModal.category || 'RESIDENCIES',
+        location: designRequestForm.location.trim() || designRequestModal.location || 'Location to be confirmed',
+        expectedBudget: designRequestForm.expectedBudget ? Number(designRequestForm.expectedBudget) : (designRequestModal.budget ? Number(designRequestModal.budget) : null),
+        targetStartDate: designRequestForm.targetStartDate || null,
+        specifications: designRequestModal.specifications || null,
+        description: designRequestForm.customNotes.trim() || `Request based on ${designRequestModal.name}`,
+        imageUrls: designRequestModal.imageUrls && designRequestModal.imageUrls.length > 0 ? designRequestModal.imageUrls : (designRequestModal.imageUrl ? [designRequestModal.imageUrl] : []),
+      };
+
+      await createProjectRequest(payload);
+      setSuccessMsg(`Your project request for "${designRequestModal.name}" has been submitted to the Client Manager!`);
+      setDesignRequestModal(null);
+      setRequestProjectMode('history');
+      const reqData = await getProjectRequests(clientProfile.id);
+      setProjectRequests(reqData || []);
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err) {
+      setError(err.message || 'Failed to submit project request');
+    } finally {
+      setSubmittingDesignRequest(false);
     }
   };
 
@@ -428,10 +628,10 @@ export default function ClientDashboard() {
 
           <button
             type="button"
-            className={`tab-btn-item ${activeTab === 'designs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('designs')}
+            className={`tab-btn-item ${activeTab === 'request-project' ? 'active' : ''}`}
+            onClick={() => setActiveTab('request-project')}
           >
-            <span>Company Designs ({allShowcaseProjects.length})</span>
+            <span>Request Project {projectRequests.length > 0 ? `(${projectRequests.length})` : ''}</span>
           </button>
 
           <button
@@ -458,13 +658,6 @@ export default function ClientDashboard() {
             <span>Documents Vault ({documents.length})</span>
           </button>
 
-          <button
-            type="button"
-            className={`tab-btn-item ${activeTab === 'feedback' ? 'active' : ''}`}
-            onClick={() => setActiveTab('feedback')}
-          >
-            <span>Feedback & Reviews ({feedbacks.length})</span>
-          </button>
 
           <button
             type="button"
@@ -650,11 +843,7 @@ export default function ClientDashboard() {
             projects={allShowcaseProjects}
             selectedCategory={selectedCategory}
             onSelectCategory={(cat) => setSelectedCategory(cat)}
-            onInquire={(proj) => {
-              setInquirySubject(`Inquiry regarding ${proj.name}`);
-              setInquiryProjectId(String(proj.id));
-              setActiveTab('inquiries');
-            }}
+            onInquire={(proj) => handleOpenDesignInquiry(proj)}
             onSelectProject={(project) => {
               setSelectedDesign(project);
               setActiveTab('design-details');
@@ -667,11 +856,7 @@ export default function ClientDashboard() {
             projects={allShowcaseProjects}
             selectedCategory={selectedCategory}
             onSelectCategory={(cat) => setSelectedCategory(cat)}
-            onInquire={(project) => {
-              setInquirySubject(`Inquiry regarding ${project.name}`);
-              setInquiryProjectId(String(project.id));
-              setActiveTab('inquiries');
-            }}
+            onInquire={(project) => handleOpenDesignInquiry(project)}
             onSelectProject={(project) => {
               setSelectedDesign(project);
               setSelectedDesignImgIdx(0);
@@ -703,14 +888,562 @@ export default function ClientDashboard() {
                 <p className="company-design-details__description">{selectedDesign.description || 'Contact our Client Manager for the full design specification and availability.'}</p>
                 {selectedDesign.specifications && <p><strong>Specifications:</strong> {selectedDesign.specifications}</p>}
                 <p><strong>Starting from:</strong> {selectedDesign.priceRange || formatMoney(selectedDesign.budget)}</p>
-                <button type="button" className="btn-solid-green" onClick={() => {
-                  setInquirySubject(`Design inquiry: ${selectedDesign.name}`);
-                  setInquiryProjectId(String(selectedDesign.id));
-                  setActiveTab('inquiries');
-                }}>Ask About This Design</button>
               </div>
             </div>
           </section>
+        )}
+
+        {/* TAB: REQUEST PROJECT (Choose design type or submit custom design) */}
+        {activeTab === 'request-project' && (
+          <div>
+            {/* Top Mode Switcher Bar */}
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={requestProjectMode === 'browse' ? 'btn-solid-green' : 'btn-outline-green'}
+                style={{ padding: '0.65rem 1.25rem', fontSize: '0.92rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                onClick={() => setRequestProjectMode('browse')}
+              >
+                <span>🏛️</span> Browse Company Designs by Type
+              </button>
+
+              <button
+                type="button"
+                className={requestProjectMode === 'custom' ? 'btn-solid-green' : 'btn-outline-green'}
+                style={{ padding: '0.65rem 1.25rem', fontSize: '0.92rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                onClick={() => setRequestProjectMode('custom')}
+              >
+                <span>✏️</span> Request Your Own Custom Design
+              </button>
+
+              <button
+                type="button"
+                className={requestProjectMode === 'history' ? 'btn-solid-green' : 'btn-outline-green'}
+                style={{ padding: '0.65rem 1.25rem', fontSize: '0.92rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                onClick={() => setRequestProjectMode('history')}
+              >
+                <span>📋</span> My Project Requests ({projectRequests.length})
+              </button>
+            </div>
+
+            {/* Sub-view 1: Browse Designs by Type */}
+            {requestProjectMode === 'browse' && (
+              <div>
+                <div className="light-panel-card" style={{ marginBottom: '1.5rem' }}>
+                  <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div>
+                      <span className="brand-green-subtitle">SELECT DESIGN TYPE</span>
+                      <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Choose Project Type &amp; Explore Architectural Designs</h3>
+                      <p className="panel-meta" style={{ margin: 0 }}>Select a category below to see ready-to-build company designs, or request your custom design.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-solid-green"
+                      onClick={() => setRequestProjectMode('custom')}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      + Request Custom Design
+                    </button>
+                  </div>
+
+                  {/* Category Filter Pills */}
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1.25rem' }}>
+                    {[
+                      { key: 'ALL', label: 'All Designs' },
+                      { key: 'RESIDENCIES', label: 'Residencies' },
+                      { key: 'APARTMENTS', label: 'Luxury Apartments' },
+                      { key: 'LANDS', label: 'Lands & Plots' },
+                      { key: 'HOMES', label: 'Homes' },
+                    ].map((cat) => (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => setRequestCategoryFilter(cat.key)}
+                        style={{
+                          padding: '0.45rem 1.1rem',
+                          borderRadius: '20px',
+                          border: requestCategoryFilter === cat.key ? '2px solid var(--brand-green)' : '1px solid #cbd5e1',
+                          background: requestCategoryFilter === cat.key ? 'var(--brand-green)' : '#ffffff',
+                          color: requestCategoryFilter === cat.key ? '#ffffff' : '#334155',
+                          fontWeight: 600,
+                          fontSize: '0.86rem',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Filtered Designs Grid */}
+                {(() => {
+                  const filteredDesigns = allShowcaseProjects.filter((p) => {
+                    if (requestCategoryFilter === 'ALL') return true;
+                    return p.category === requestCategoryFilter;
+                  });
+
+                  if (filteredDesigns.length === 0) {
+                    return (
+                      <div className="light-panel-card" style={{ textAlign: 'center', padding: '3rem' }}>
+                        <h3>No company designs in this category yet</h3>
+                        <p className="text-muted">You can submit your own custom design with your drawings, site photos, and expected budget.</p>
+                        <button
+                          type="button"
+                          className="btn-solid-green"
+                          style={{ marginTop: '1rem' }}
+                          onClick={() => setRequestProjectMode('custom')}
+                        >
+                          Request Your Own Custom Design
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="light-property-grid">
+                      {filteredDesigns.map((p) => (
+                        <article className="light-property-card" key={p.id}>
+                          <div className="card-media-wrap">
+                            <img
+                              src={p.imageUrl || (p.imageUrls && p.imageUrls[0]) || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80'}
+                              alt={p.name}
+                              className="card-media-img"
+                            />
+                            <span className="media-tag-badge">{p.category}</span>
+                            {p.imageUrls && p.imageUrls.length > 1 && (
+                              <span style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px' }}>
+                                📸 {p.imageUrls.length} Photos
+                              </span>
+                            )}
+                          </div>
+                          <div className="card-content-body">
+                            <span className="card-location">📍 {p.location || 'Sri Lanka'}</span>
+                            <h3 className="card-title">{p.name}</h3>
+                            <p className="card-description">{p.description}</p>
+                            {p.specifications && (
+                              <div style={{ margin: '0.5rem 0', fontSize: '0.82rem', color: '#475569', background: '#f8fafc', padding: '0.4rem 0.6rem', borderRadius: '6px' }}>
+                                <strong>Specs:</strong> {p.specifications}
+                              </div>
+                            )}
+                            <div className="card-footer-strip">
+                              <div className="card-price-block">
+                                <small>Starting Budget</small>
+                                <strong>{p.priceRange || (p.budget ? formatMoney(p.budget) : 'Custom Quote')}</strong>
+                              </div>
+                              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button
+                                  type="button"
+                                  className="btn-outline-green"
+                                  style={{ padding: '0.45rem 0.8rem', fontSize: '0.82rem' }}
+                                  onClick={() => {
+                                    setSelectedDesign(p);
+                                    setActiveTab('design-details');
+                                  }}
+                                >
+                                  Details
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-solid-green"
+                                  style={{ padding: '0.45rem 0.8rem', fontSize: '0.82rem' }}
+                                  onClick={() => handleOpenDesignRequest(p)}
+                                >
+                                  Request Project →
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Sub-view 2: Submit Custom Design Request */}
+            {requestProjectMode === 'custom' && (
+              <div className="light-panel-card">
+                <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <span className="brand-green-subtitle">CUSTOM CONSTRUCTION REQUEST</span>
+                    <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Request Your Own Custom Design Project</h3>
+                    <p className="panel-meta" style={{ margin: 0 }}>
+                      Provide your requirements, site photos, blueprints, and expected budget. Your request will go to the Client Manager and Project Engineering team.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-outline-green"
+                    onClick={() => setRequestProjectMode('browse')}
+                  >
+                    ← Browse Company Designs
+                  </button>
+                </div>
+
+                <form onSubmit={handleSubmitCustomRequest} style={{ marginTop: '1.5rem' }}>
+                  <div className="form-grid-2">
+                    <div className="form-input-box">
+                      <label>Project Title / Name *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Modern 2-Story Villa in Negombo"
+                        value={customRequestForm.title}
+                        onChange={(e) => setCustomRequestForm({ ...customRequestForm, title: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-input-box">
+                      <label>Project Type / Category *</label>
+                      <select
+                        value={customRequestForm.category}
+                        onChange={(e) => setCustomRequestForm({ ...customRequestForm, category: e.target.value })}
+                        required
+                      >
+                        <option value="RESIDENCIES">Residencies &amp; Private Villas</option>
+                        <option value="APARTMENTS">Luxury Apartments</option>
+                        <option value="LANDS">Lands &amp; Plot Developments</option>
+                        <option value="HOMES">Residential Homes</option>
+                      </select>
+                    </div>
+
+                    <div className="form-input-box">
+                      <label>Project Location (City / District) *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Kadawatha Road, Ragama"
+                        value={customRequestForm.location}
+                        onChange={(e) => setCustomRequestForm({ ...customRequestForm, location: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-input-box">
+                      <label>Expected Budget (LKR) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="10000"
+                        placeholder="e.g. 25000000"
+                        value={customRequestForm.expectedBudget}
+                        onChange={(e) => setCustomRequestForm({ ...customRequestForm, expectedBudget: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-input-box">
+                      <label>Target Construction Start Date (Optional)</label>
+                      <input
+                        type="date"
+                        value={customRequestForm.targetStartDate}
+                        onChange={(e) => setCustomRequestForm({ ...customRequestForm, targetStartDate: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="form-input-box">
+                      <label>Desired Specifications / Key Metrics</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 4 Bedrooms, 3 Bathrooms, 3200 sq ft, 2-vehicle port"
+                        value={customRequestForm.specifications}
+                        onChange={(e) => setCustomRequestForm({ ...customRequestForm, specifications: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-input-box" style={{ marginTop: '1.25rem' }}>
+                    <label>Detailed Requirements &amp; Architectural Vision *</label>
+                    <textarea
+                      rows={4}
+                      placeholder="Describe your design expectations, site conditions, preferred materials, style (modern, colonial, tropical), etc..."
+                      value={customRequestForm.description}
+                      onChange={(e) => setCustomRequestForm({ ...customRequestForm, description: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  {/* Photos and Blueprints Upload Section (Max 5) */}
+                  <div style={{ marginTop: '1.5rem', padding: '1.25rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div>
+                        <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>Upload Photos / Drawings / Sketches (Maximum 5)</strong>
+                        <p style={{ margin: '0.2rem 0 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                          Add land photos, sketch designs, reference architectural images, or floor plans.
+                        </p>
+                      </div>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: customRequestImages.length === 5 ? '#e11d48' : 'var(--brand-green)' }}>
+                        {customRequestImages.length} / 5 Images Uploaded
+                      </span>
+                    </div>
+
+                    {customRequestImages.length < 5 && (
+                      <div style={{ margin: '0.75rem 0' }}>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          multiple
+                          onChange={handleAddRequestImages}
+                          style={{ fontSize: '0.9rem' }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Previews Strip */}
+                    {customRequestImages.length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                        {customRequestImages.map((img, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              position: 'relative',
+                              width: '110px',
+                              height: '90px',
+                              borderRadius: '8px',
+                              overflow: 'hidden',
+                              border: '2px solid #cbd5e1',
+                              background: '#fff',
+                            }}
+                          >
+                            <img src={img} alt={`Upload ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRequestImage(idx)}
+                              style={{
+                                position: 'absolute',
+                                top: '3px',
+                                right: '3px',
+                                background: '#e11d48',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                              title="Remove image"
+                            >
+                              ✕
+                            </button>
+                            <span style={{ position: 'absolute', bottom: '2px', left: '2px', background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: '9px', padding: '1px 4px', borderRadius: '4px' }}>
+                              Photo {idx + 1}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ marginTop: '1.75rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn-outline-green"
+                      onClick={() => setRequestProjectMode('browse')}
+                      disabled={submittingCustomRequest}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-solid-green"
+                      disabled={submittingCustomRequest}
+                      style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}
+                    >
+                      {submittingCustomRequest ? 'Submitting to Client Manager...' : 'Submit Request to Client Manager'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Sub-view 3: My Project Requests History & Official Responses */}
+            {requestProjectMode === 'history' && (
+              <div className="light-panel-card">
+                <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <span className="brand-green-subtitle">STATUS TRACKER</span>
+                    <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>My Project Requests &amp; Official Engineering Proposals</h3>
+                    <p className="panel-meta" style={{ margin: 0 }}>Track your submitted project requests, technical engineering assessments, and official responses from our team.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-solid-green"
+                    onClick={() => setRequestProjectMode('custom')}
+                  >
+                    + New Custom Request
+                  </button>
+                </div>
+
+                {projectRequests.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '3rem' }}>
+                    <span style={{ fontSize: '3rem', display: 'block', marginBottom: '0.5rem' }}>📋</span>
+                    <h4>No Project Requests Submitted Yet</h4>
+                    <p className="text-muted">Browse our company designs or submit your own custom design to get started.</p>
+                    <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1rem' }}>
+                      <button type="button" className="btn-solid-green" onClick={() => setRequestProjectMode('browse')}>
+                        Browse Designs
+                      </button>
+                      <button type="button" className="btn-outline-green" onClick={() => setRequestProjectMode('custom')}>
+                        Submit Custom Request
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
+                    {projectRequests.map((req) => {
+                      const isPendingCm = req.status === 'PENDING_CM_REVIEW';
+                      const isForwardedPm = req.status === 'FORWARDED_TO_PM';
+                      const isPmReviewed = req.status === 'PM_REVIEWED';
+                      const isClientNotified = req.status === 'CLIENT_NOTIFIED';
+                      const isApproved = req.status === 'APPROVED';
+                      const isRejected = req.status === 'REJECTED';
+                      const isStarted = req.status === 'PROJECT_STARTED';
+
+                      return (
+                        <div
+                          key={req.id}
+                          style={{
+                            background: '#f8fafc',
+                            border: isStarted ? '2px solid #10b981' : (isApproved ? '2px solid #16a34a' : (isRejected ? '1px solid #ef4444' : (isClientNotified ? '2px solid var(--brand-green)' : '1px solid var(--border-color)'))),
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                          }}
+                        >
+                          {/* Header */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <div>
+                              <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>{req.category}</span>
+                              <h4 style={{ margin: '0.2rem 0', fontSize: '1.25rem', color: '#0f172a' }}>{req.title}</h4>
+                              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                📍 {req.location || 'Location not specified'} &nbsp;|&nbsp; Submitted on {formatDate(req.createdAt)}
+                              </p>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                              {isPendingCm && <span className="pill-badge warning">⏳ Pending Client Manager</span>}
+                              {isForwardedPm && <span className="pill-badge active">🏗️ Engineering Review (PM)</span>}
+                              {isPmReviewed && <span className="pill-badge active" style={{ background: '#dbeafe', color: '#1e40af' }}>🔍 Assessment Completed</span>}
+                              {isClientNotified && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700 }}>✉️ Proposal Ready</span>}
+                              {isApproved && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>✓ Request Approved</span>}
+                              {isStarted && <span className="pill-badge completed" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700 }}>🚀 Project Started</span>}
+                              {isRejected && <span className="pill-badge error" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>✗ Not Approved</span>}
+                            </div>
+                          </div>
+
+                          {/* Quick Specs & Budget Strip */}
+                          <div style={{ display: 'flex', gap: '1.5rem', margin: '1rem 0', flexWrap: 'wrap', background: '#ffffff', padding: '0.85rem 1.15rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                            <div>
+                              <small style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.78rem' }}>Your Expected Budget</small>
+                              <strong style={{ color: 'var(--brand-green)', fontSize: '1.05rem' }}>{req.expectedBudget ? formatMoney(req.expectedBudget) : 'Custom Quote'}</strong>
+                            </div>
+                            {req.targetStartDate && (
+                              <div>
+                                <small style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.78rem' }}>Target Start Date</small>
+                                <strong style={{ color: '#0f172a' }}>{formatDate(req.targetStartDate)}</strong>
+                              </div>
+                            )}
+                            {req.specifications && (
+                              <div style={{ flex: 1, minWidth: '200px' }}>
+                                <small style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.78rem' }}>Specifications</small>
+                                <span style={{ color: '#334155', fontSize: '0.9rem' }}>{req.specifications}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <p style={{ color: '#334155', fontSize: '0.92rem', margin: '0.75rem 0' }}>{req.description}</p>
+
+                          {/* Uploaded Photos Thumbnails */}
+                          {req.imageUrls && req.imageUrls.length > 0 && (
+                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                              <small style={{ color: 'var(--text-muted)', marginRight: '0.25rem' }}>Attached Photos ({req.imageUrls.length}):</small>
+                              {req.imageUrls.map((img, i) => (
+                                <img
+                                  key={i}
+                                  src={img}
+                                  alt={`Attachment ${i + 1}`}
+                                  style={{ width: '60px', height: '50px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                                  onClick={() => setSelectedRequestDetails(req)}
+                                />
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Step Progress Tracker */}
+                          <div style={{ margin: '1.25rem 0 0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8rem', color: '#64748b', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--brand-green)' }}>✓ 1. Request Submitted</span>
+                            <span>→</span>
+                            <span style={{ fontWeight: isForwardedPm || isPmReviewed || isClientNotified ? 600 : 400, color: isForwardedPm || isPmReviewed || isClientNotified ? 'var(--brand-green)' : '#94a3b8' }}>
+                              {isForwardedPm || isPmReviewed || isClientNotified ? '✓ 2. Forwarded to PM' : '2. Forwarded to PM'}
+                            </span>
+                            <span>→</span>
+                            <span style={{ fontWeight: isPmReviewed || isClientNotified ? 600 : 400, color: isPmReviewed || isClientNotified ? 'var(--brand-green)' : '#94a3b8' }}>
+                              {isPmReviewed || isClientNotified ? '✓ 3. PM Reviewed' : '3. PM Review'}
+                            </span>
+                            <span>→</span>
+                            <span style={{ fontWeight: isClientNotified ? 700 : 400, color: isClientNotified ? '#15803d' : '#94a3b8' }}>
+                              {isClientNotified ? '✓ 4. Proposal Delivered' : '4. Client Proposal'}
+                            </span>
+                          </div>
+
+                          {/* Official Response from Client Manager */}
+                          {req.clientMessage && (
+                            <div style={{ marginTop: '1rem', padding: '1.25rem', background: '#f0fdf4', borderLeft: '4px solid var(--brand-green)', borderRadius: '0 8px 8px 0' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <strong style={{ color: 'var(--brand-green)', fontSize: '0.95rem' }}>
+                                  ✉️ Official Proposal &amp; Response from {req.clientNotifiedBy || 'Client Manager'}:
+                                </strong>
+                                <small style={{ color: 'var(--text-muted)' }}>{formatDate(req.clientNotifiedAt)}</small>
+                              </div>
+                              <p style={{ color: '#0f172a', fontSize: '0.95rem', margin: '0.4rem 0 0', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                                {req.clientMessage}
+                              </p>
+                              {req.pmEstimatedBudget && (
+                                <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.85rem', background: '#ffffff', borderRadius: '6px', display: 'flex', gap: '1.5rem', fontSize: '0.85rem', flexWrap: 'wrap' }}>
+                                  <span><strong>Estimated Cost:</strong> {formatMoney(req.pmEstimatedBudget)}</span>
+                                  {req.pmEstimatedDuration && <span><strong>Estimated Timeline:</strong> {req.pmEstimatedDuration}</span>}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Rejection notice */}
+                          {req.rejectionReason && (
+                            <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#fef2f2', borderLeft: '4px solid #ef4444', borderRadius: '0 8px 8px 0', fontSize: '0.9rem' }}>
+                              <strong style={{ color: '#b91c1c' }}>Rejection Reason:</strong>
+                              <p style={{ margin: '0.2rem 0 0', color: '#7f1d1d' }}>{req.rejectionReason}</p>
+                            </div>
+                          )}
+
+                          {/* Started project banner */}
+                          {isStarted && (
+                            <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#ecfdf5', borderLeft: '4px solid #10b981', borderRadius: '0 8px 8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                              <div>
+                                <strong style={{ color: '#047857' }}>🚀 Construction Project Initialized &amp; Assigned!</strong>
+                                <p style={{ margin: '0.2rem 0 0', color: '#065f46', fontSize: '0.88rem' }}>The Project Manager has officially started your construction project. Check live milestones and updates under My Projects.</p>
+                              </div>
+                              <button
+                                type="button"
+                                className="btn-solid-green"
+                                style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem' }}
+                                onClick={() => setActiveTab('projects')}
+                              >
+                                View My Projects →
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {/* TAB 3: MY PROJECTS */}
@@ -781,12 +1514,12 @@ export default function ClientDashboard() {
               <form onSubmit={handleSendInquiry}>
                 <div className="form-grid-2">
                   <div className="form-input-box">
-                    <label>Related Project</label>
+                    <label>Related Construction Project (Added by Project Manager)</label>
                     <select
                       value={inquiryProjectId}
                       onChange={(e) => setInquiryProjectId(e.target.value)}
                     >
-                      <option value="">-- Choose Project (Optional) --</option>
+                      <option value="">-- Choose Assigned Project (Optional) --</option>
                       {projects.map((p) => (
                         <option key={p.id} value={p.id}>{p.name} ({p.location})</option>
                       ))}
@@ -867,7 +1600,7 @@ export default function ClientDashboard() {
                         </a>
                       )}
                       <small style={{ color: 'var(--text-muted)' }}>
-                        Sent on {formatDate(inq.createdAt)} {inq.project ? `| Project: ${inq.project.name}` : ''}
+                        Sent on {formatDate(inq.createdAt)} {inq.project ? `| ${inq.project.marketingDesign ? 'Company Design' : 'Project'}: ${inq.project.name}` : ''}
                       </small>
 
                       {inq.response && (
@@ -1471,6 +2204,219 @@ export default function ClientDashboard() {
                 ) : (
                   <p style={{ textAlign: 'center', color: '#64748b' }}>No receipt available.</p>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== COMPANY DESIGN INQUIRY MODAL (DIRECT TO CLIENT MANAGER) ===== */}
+        {designInquiryModalOpen && designInquiryTarget && (
+          <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
+            <div className="light-modal-box" style={{ maxWidth: '620px', width: '95%', padding: '1.75rem', borderRadius: '14px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL INQUIRY TO CLIENT MANAGER</span>
+                  <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Inquire: {designInquiryTarget.name}</h3>
+                </div>
+                <button type="button" onClick={() => { setDesignInquiryModalOpen(false); setDesignInquiryTarget(null); }}>✕</button>
+              </div>
+
+              <form onSubmit={handleSubmitDesignInquiry} style={{ marginTop: '1.25rem' }}>
+                <div className="form-input-box">
+                  <label>Client</label>
+                  <input type="text" value={`${clientProfile?.name || user?.name || ''} (${clientProfile?.email || user?.email || user?.username || ''})`} disabled style={{ background: '#f1f5f9' }} />
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                  <label>Selected Design</label>
+                  <input type="text" value={`${designInquiryTarget.name} — Starting at ${designInquiryTarget.priceRange || formatMoney(designInquiryTarget.budget)}`} disabled style={{ background: '#f1f5f9' }} />
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                  <label>Inquiry Message *</label>
+                  <textarea
+                    rows={4}
+                    value={designInquiryMessage}
+                    onChange={(e) => setDesignInquiryMessage(e.target.value)}
+                    placeholder="Describe your questions or requirements regarding this design..."
+                    required
+                  />
+                </div>
+
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.6rem', fontSize: '0.8rem' }}>
+                  Your inquiry will be sent directly to the Client Manager and logged into your inquiry history with today's date.
+                </small>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn-outline-green"
+                    onClick={() => { setDesignInquiryModalOpen(false); setDesignInquiryTarget(null); }}
+                    disabled={sendingDesignInquiry}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-solid-green"
+                    disabled={sendingDesignInquiry}
+                  >
+                    {sendingDesignInquiry ? 'Sending to Client Manager...' : 'Submit Inquiry to Client Manager'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ===== PROJECT REQUEST MODAL FOR EXISTING DESIGN ===== */}
+        {designRequestModal && (
+          <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
+            <div className="light-modal-box" style={{ maxWidth: '640px', width: '95%', padding: '1.75rem', borderRadius: '14px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL PROJECT REQUEST</span>
+                  <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Request Project: {designRequestModal.name}</h3>
+                </div>
+                <button type="button" onClick={() => setDesignRequestModal(null)}>✕</button>
+              </div>
+
+              <form onSubmit={handleSubmitDesignRequest} style={{ marginTop: '1.25rem' }}>
+                <div className="form-input-box">
+                  <label>Selected Company Design</label>
+                  <input
+                    type="text"
+                    value={`${designRequestModal.name} (${designRequestModal.category}) — ${designRequestModal.priceRange || (designRequestModal.budget ? formatMoney(designRequestModal.budget) : 'Starting Price')}`}
+                    disabled
+                    style={{ background: '#f1f5f9' }}
+                  />
+                </div>
+
+                <div className="form-grid-2" style={{ marginTop: '1rem' }}>
+                  <div className="form-input-box">
+                    <label>Your Land / Project Location *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Negombo Road, Ja-Ela"
+                      value={designRequestForm.location}
+                      onChange={(e) => setDesignRequestForm({ ...designRequestForm, location: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Expected Budget (LKR)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="10000"
+                      placeholder="e.g. 28000000"
+                      value={designRequestForm.expectedBudget}
+                      onChange={(e) => setDesignRequestForm({ ...designRequestForm, expectedBudget: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                  <label>Target Construction Start Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={designRequestForm.targetStartDate}
+                    onChange={(e) => setDesignRequestForm({ ...designRequestForm, targetStartDate: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                  <label>Specific Customization Notes / Requirements</label>
+                  <textarea
+                    rows={4}
+                    value={designRequestForm.customNotes}
+                    onChange={(e) => setDesignRequestForm({ ...designRequestForm, customNotes: e.target.value })}
+                    placeholder="Enter any modifications or land dimensions you want incorporated..."
+                  />
+                </div>
+
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.6rem', fontSize: '0.8rem' }}>
+                  Your request will be submitted to the Client Manager and forwarded to our Project Manager for site feasibility and quotation.
+                </small>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button
+                    type="button"
+                    className="btn-outline-green"
+                    onClick={() => setDesignRequestModal(null)}
+                    disabled={submittingDesignRequest}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-solid-green"
+                    disabled={submittingDesignRequest}
+                  >
+                    {submittingDesignRequest ? 'Submitting Request...' : 'Submit Project Request'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ===== PROJECT REQUEST DETAILS MODAL ===== */}
+        {selectedRequestDetails && (
+          <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
+            <div className="light-modal-box" style={{ maxWidth: '700px', width: '95%', padding: '1.75rem', borderRadius: '14px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>PROJECT REQUEST DETAILS</span>
+                  <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>{selectedRequestDetails.title}</h3>
+                </div>
+                <button type="button" onClick={() => setSelectedRequestDetails(null)}>✕</button>
+              </div>
+
+              <div style={{ marginTop: '1rem' }}>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem' }}>
+                  <div>
+                    <small style={{ color: 'var(--text-muted)', display: 'block' }}>Category</small>
+                    <strong>{selectedRequestDetails.category}</strong>
+                  </div>
+                  <div>
+                    <small style={{ color: 'var(--text-muted)', display: 'block' }}>Location</small>
+                    <strong>{selectedRequestDetails.location || 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <small style={{ color: 'var(--text-muted)', display: 'block' }}>Expected Budget</small>
+                    <strong style={{ color: 'var(--brand-green)' }}>{selectedRequestDetails.expectedBudget ? formatMoney(selectedRequestDetails.expectedBudget) : 'N/A'}</strong>
+                  </div>
+                  <div>
+                    <small style={{ color: 'var(--text-muted)', display: 'block' }}>Status</small>
+                    <strong>{selectedRequestDetails.status}</strong>
+                  </div>
+                </div>
+
+                {selectedRequestDetails.specifications && (
+                  <p style={{ margin: '0.5rem 0' }}><strong>Specifications:</strong> {selectedRequestDetails.specifications}</p>
+                )}
+                <p style={{ margin: '0.5rem 0', color: '#334155' }}><strong>Description:</strong> {selectedRequestDetails.description}</p>
+
+                {selectedRequestDetails.imageUrls && selectedRequestDetails.imageUrls.length > 0 && (
+                  <div style={{ marginTop: '1rem' }}>
+                    <strong>Attached Photos &amp; Drawings:</strong>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '0.5rem' }}>
+                      {selectedRequestDetails.imageUrls.map((img, i) => (
+                        <a key={i} href={img} target="_blank" rel="noopener noreferrer">
+                          <img src={img} alt={`Photo ${i + 1}`} style={{ width: '100%', height: '110px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ marginTop: '1.5rem', textAlign: 'right' }}>
+                  <button type="button" className="btn-solid-green" onClick={() => setSelectedRequestDetails(null)}>
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>

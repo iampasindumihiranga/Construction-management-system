@@ -19,6 +19,12 @@ import {
   addMilestone,
   getInquiries,
   respondToInquiry,
+  getProjectRequests,
+  forwardProjectRequestToPm,
+  sendProjectRequestResponseToClient,
+  approveProjectRequest,
+  rejectProjectRequest,
+  deleteProjectRequest,
   getDocuments,
   uploadDocument,
   getFeedback,
@@ -76,6 +82,25 @@ export default function ClientManagerDashboard() {
   const [documents, setDocuments] = useState([]);
   const [feedbacks, setFeedbacks] = useState([]);
   const [downPayments, setDownPayments] = useState([]);
+  const [projectRequests, setProjectRequests] = useState([]);
+  const [projectRequestFilter, setProjectRequestFilter] = useState('ALL');
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwardTarget, setForwardTarget] = useState(null);
+  const [forwardCmNotes, setForwardCmNotes] = useState('');
+  const [submittingForward, setSubmittingForward] = useState(false);
+  const [clientNotifyModalOpen, setClientNotifyModalOpen] = useState(false);
+  const [clientNotifyTarget, setClientNotifyTarget] = useState(null);
+  const [clientNotifyMessage, setClientNotifyMessage] = useState('');
+  const [submittingClientNotify, setSubmittingClientNotify] = useState(false);
+  const [previewRequestPhotosModal, setPreviewRequestPhotosModal] = useState(null);
+  const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [approveTarget, setApproveTarget] = useState(null);
+  const [approveNotes, setApproveNotes] = useState('');
+  const [submittingApprove, setSubmittingApprove] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [submittingReject, setSubmittingReject] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -195,6 +220,7 @@ export default function ClientManagerDashboard() {
         docsData,
         feedbacksData,
         paymentsData,
+        requestsData,
       ] = await Promise.all([
         getDashboardSummary(),
         getClients(clientSearch),
@@ -209,6 +235,7 @@ export default function ClientManagerDashboard() {
           status: paymentStatusFilter,
           clientId: paymentClientFilter || undefined,
         }),
+        getProjectRequests(),
       ]);
 
       setSummary(dashSummary);
@@ -220,6 +247,7 @@ export default function ClientManagerDashboard() {
       setDocuments(docsData);
       setFeedbacks(feedbacksData);
       setDownPayments(paymentsData);
+      setProjectRequests(requestsData || []);
       setError('');
     } catch (err) {
       setError(err.message || 'Failed to load manager dashboard data');
@@ -581,7 +609,7 @@ export default function ClientManagerDashboard() {
         paymentDate: paymentForm.paymentDate,
         paymentMethod: paymentForm.paymentMethod,
         referenceNumber: paymentForm.referenceNumber.trim() || null,
-        status: computeStatusFromDates(paymentForm.paymentDate),
+        status: paymentForm.status ? paymentForm.status : computeStatusFromDates(paymentForm.paymentDate),
         notes: paymentForm.notes.trim() || null,
         totalProjectAmount: paymentForm.totalProjectAmount ? Number(paymentForm.totalProjectAmount) : null,
         requiredDownPayment: paymentForm.requiredDownPayment ? Number(paymentForm.requiredDownPayment) : null,
@@ -624,6 +652,151 @@ export default function ClientManagerDashboard() {
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
       setError(err.message || 'Error deleting payment');
+    }
+  };
+
+  const handleOpenForwardModal = (request) => {
+    setForwardTarget(request);
+    setForwardCmNotes(`Please review the client's custom project requirements, evaluate structural & architectural feasibility, and provide estimated construction budget and timeline.`);
+    setForwardModalOpen(true);
+  };
+
+  const handleSubmitForward = async (e) => {
+    e.preventDefault();
+    if (!forwardTarget) return;
+    setSubmittingForward(true);
+    setError('');
+    try {
+      await forwardProjectRequestToPm(forwardTarget.id, forwardCmNotes.trim(), 'Client Manager');
+      setSuccessMsg(`Project request "${forwardTarget.title}" forwarded to Project Manager successfully!`);
+      setForwardModalOpen(false);
+      setForwardTarget(null);
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to forward project request to PM');
+    } finally {
+      setSubmittingForward(false);
+    }
+  };
+
+  const handleOpenClientNotifyModal = (request) => {
+    setClientNotifyTarget(request);
+    let defaultMsg = `Dear ${request.client?.name || 'Valued Client'},\n\nOur Project Management & Engineering team has evaluated your custom project request for "${request.title}".`;
+    if (request.pmEstimatedBudget) {
+      defaultMsg += `\n\n• Estimated Construction Cost: ${formatMoney(request.pmEstimatedBudget)}`;
+    }
+    if (request.pmEstimatedDuration) {
+      defaultMsg += `\n• Estimated Project Duration: ${request.pmEstimatedDuration}`;
+    }
+    if (request.pmReply) {
+      defaultMsg += `\n\nEngineering Assessment & Notes:\n${request.pmReply}`;
+    }
+    defaultMsg += `\n\nPlease reply or contact our office if you would like to proceed with formal site inspection and initial drawings.\n\nWarm regards,\nClient Relations Management\nOdiliya Homes & Real Estate`;
+    setClientNotifyMessage(defaultMsg);
+    setClientNotifyModalOpen(true);
+  };
+
+  const handleSubmitClientNotify = async (e) => {
+    e.preventDefault();
+    if (!clientNotifyTarget || !clientNotifyMessage.trim()) return;
+    setSubmittingClientNotify(true);
+    setError('');
+    try {
+      await sendProjectRequestResponseToClient(clientNotifyTarget.id, clientNotifyMessage.trim(), 'Client Manager');
+      setSuccessMsg(`Official response delivered to ${clientNotifyTarget.client?.name || 'client'}!`);
+      setClientNotifyModalOpen(false);
+      setClientNotifyTarget(null);
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to send response to client');
+    } finally {
+      setSubmittingClientNotify(false);
+    }
+  };
+
+  const handleOpenApproveModal = (request) => {
+    setApproveTarget(request);
+    setApproveNotes(`Your project request for "${request.title}" has been approved! The Project Manager will now proceed to initialize your project.`);
+    setApproveModalOpen(true);
+  };
+
+  const handleConfirmApprove = async (e) => {
+    if (e) e.preventDefault();
+    if (!approveTarget) return;
+    setSubmittingApprove(true);
+    setError('');
+    try {
+      await approveProjectRequest(approveTarget.id, {
+        cmNotes: approveNotes.trim(),
+        clientMessage: approveNotes.trim(),
+        approvedBy: 'Client Manager',
+      });
+      setSuccessMsg(`Project request "${approveTarget.title}" approved! Project Manager can now initialize and start the project.`);
+      setApproveModalOpen(false);
+      setApproveTarget(null);
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to approve project request');
+    } finally {
+      setSubmittingApprove(false);
+    }
+  };
+
+  const handleOpenRejectModal = (request) => {
+    setRejectTarget(request);
+    setRejectReason('');
+    setRejectModalOpen(true);
+  };
+
+  const handleConfirmReject = async (e) => {
+    if (e) e.preventDefault();
+    if (!rejectTarget) return;
+    if (!rejectReason.trim()) {
+      setError('Please provide a reason for rejecting the request.');
+      return;
+    }
+    setSubmittingReject(true);
+    setError('');
+    try {
+      await rejectProjectRequest(rejectTarget.id, {
+        reason: rejectReason.trim(),
+        rejectedBy: 'Client Manager',
+      });
+      setSuccessMsg(`Project request "${rejectTarget.title}" was rejected.`);
+      setRejectModalOpen(false);
+      setRejectTarget(null);
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to reject project request');
+    } finally {
+      setSubmittingReject(false);
+    }
+  };
+
+  const handleUpdateDownPaymentStatus = async (paymentId, newStatus) => {
+    try {
+      await updateDownPaymentStatus(paymentId, newStatus);
+      setSuccessMsg(`Down payment status updated to "${newStatus}".`);
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to update down payment status');
+    }
+  };
+
+  const handleDeleteProjectRequest = async (request) => {
+    if (!window.confirm(`Are you sure you want to delete the project request "${request.title}"?`)) return;
+    try {
+      await deleteProjectRequest(request.id);
+      setSuccessMsg('Project request deleted.');
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to delete project request');
     }
   };
 
@@ -692,6 +865,14 @@ export default function ClientManagerDashboard() {
             onClick={() => setActiveTab('inquiries')}
           >
             Client Inquiries ({inquiries.filter((i) => i.status === 'PENDING').length > 0 ? `${inquiries.length} (${inquiries.filter((i) => i.status === 'PENDING').length} Pending)` : inquiries.length})
+          </button>
+
+          <button
+            type="button"
+            className={activeTab === 'project-requests' ? 'active' : ''}
+            onClick={() => setActiveTab('project-requests')}
+          >
+            Project Requests ({projectRequests.filter((r) => r.status === 'PENDING_CM_REVIEW' || r.status === 'PM_REVIEWED').length > 0 ? `${projectRequests.length} (${projectRequests.filter((r) => r.status === 'PENDING_CM_REVIEW' || r.status === 'PM_REVIEWED').length} Action)` : projectRequests.length})
           </button>
 
           <button
@@ -827,17 +1008,6 @@ export default function ClientManagerDashboard() {
                 <span className="brand-green-subtitle">PROFILES (US-CM-02)</span>
                 <h3 className="panel-title">Client Directory &amp; Records</h3>
               </div>
-              <button
-                type="button"
-                className="btn-solid-green"
-                onClick={() => {
-                  setEditingClient(null);
-                  setClientForm({ name: '', email: '', phone: '', companyName: '', address: '', emergencyContact: '', status: 'ACTIVE', preferredCategory: 'RESIDENCIES' });
-                  setClientModalOpen(true);
-                }}
-              >
-                + Create Client Profile
-              </button>
             </div>
 
             {/* Search */}
@@ -1636,12 +1806,33 @@ export default function ClientManagerDashboard() {
                               )}
                             </td>
                             <td>
-                              <span className={
-                                p.status === 'Valid' ? 'dp-badge-valid' :
-                                p.status === 'Expiring Soon' ? 'dp-badge-expiring' : 'dp-badge-expired'
-                              }>
-                                {p.status}
-                              </span>
+                              <select
+                                value={p.status || 'Valid'}
+                                onChange={(e) => handleUpdateDownPaymentStatus(p.id, e.target.value)}
+                                style={{
+                                  padding: '0.3rem 0.5rem',
+                                  borderRadius: '6px',
+                                  border: '1px solid #cbd5e1',
+                                  fontWeight: 600,
+                                  fontSize: '0.78rem',
+                                  cursor: 'pointer',
+                                  background:
+                                    p.status === 'Verified' || p.status === 'Approved' || p.status === 'Valid' ? '#dcfce7' :
+                                    p.status === 'Expiring Soon' || p.status === 'Pending' ? '#fef3c7' : '#fee2e2',
+                                  color:
+                                    p.status === 'Verified' || p.status === 'Approved' || p.status === 'Valid' ? '#15803d' :
+                                    p.status === 'Expiring Soon' || p.status === 'Pending' ? '#b45309' : '#b91c1c',
+                                }}
+                                title="Change down payment status"
+                              >
+                                <option value="Valid">Valid</option>
+                                <option value="Verified">Verified</option>
+                                <option value="Approved">Approved</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Expiring Soon">Expiring Soon</option>
+                                <option value="Expired">Expired</option>
+                                <option value="Refunded">Refunded</option>
+                              </select>
                             </td>
                             <td>
                               <div style={{ display: 'flex', gap: '0.35rem' }}>
@@ -1673,6 +1864,310 @@ export default function ClientManagerDashboard() {
                 <p className="text-muted">No downpayments found matching the criteria.</p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* TAB: PROJECT REQUESTS */}
+        {activeTab === 'project-requests' && (
+          <div>
+            <div className="light-panel-card" style={{ marginBottom: '1.5rem' }}>
+              <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <span className="brand-green-subtitle">CLIENT REQUEST INBOX</span>
+                  <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Client Custom Project Requests &amp; PM Workflows</h3>
+                  <p className="panel-meta" style={{ margin: 0 }}>Review custom project requests, forward to Project Manager for technical feasibility and estimates, and dispatch official proposals to clients.</p>
+                </div>
+              </div>
+
+              {/* KPI Strip */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '1rem', marginTop: '1.25rem' }}>
+                <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <small style={{ color: 'var(--text-muted)' }}>Total Requests</small>
+                  <strong style={{ fontSize: '1.4rem', display: 'block', color: '#0f172a' }}>{projectRequests.length}</strong>
+                </div>
+                <div style={{ background: '#fffbeb', padding: '1rem', borderRadius: '8px', border: '1px solid #fef3c7' }}>
+                  <small style={{ color: '#b45309' }}>Pending CM Review</small>
+                  <strong style={{ fontSize: '1.4rem', display: 'block', color: '#d97706' }}>
+                    {projectRequests.filter((r) => r.status === 'PENDING_CM_REVIEW').length}
+                  </strong>
+                </div>
+                <div style={{ background: '#eff6ff', padding: '1rem', borderRadius: '8px', border: '1px solid #dbeafe' }}>
+                  <small style={{ color: '#1e40af' }}>Forwarded to PM</small>
+                  <strong style={{ fontSize: '1.4rem', display: 'block', color: '#2563eb' }}>
+                    {projectRequests.filter((r) => r.status === 'FORWARDED_TO_PM').length}
+                  </strong>
+                </div>
+                <div style={{ background: '#f5f3ff', padding: '1rem', borderRadius: '8px', border: '1px solid #ede9fe' }}>
+                  <small style={{ color: '#6d28d9' }}>PM Replied</small>
+                  <strong style={{ fontSize: '1.4rem', display: 'block', color: '#7c3aed' }}>
+                    {projectRequests.filter((r) => r.status === 'PM_REVIEWED').length}
+                  </strong>
+                </div>
+                <div style={{ background: '#f0fdf4', padding: '1rem', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                  <small style={{ color: '#15803d' }}>Approved</small>
+                  <strong style={{ fontSize: '1.4rem', display: 'block', color: '#16a34a' }}>
+                    {projectRequests.filter((r) => r.status === 'APPROVED' || r.status === 'PROJECT_STARTED').length}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Status Filter Buttons */}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1.25rem' }}>
+                {[
+                  { key: 'ALL', label: 'All Requests' },
+                  { key: 'PENDING_CM_REVIEW', label: 'Pending CM Review' },
+                  { key: 'FORWARDED_TO_PM', label: 'Forwarded to PM' },
+                  { key: 'PM_REVIEWED', label: 'PM Replied' },
+                  { key: 'APPROVED', label: 'Approved' },
+                  { key: 'PROJECT_STARTED', label: 'Project Started' },
+                  { key: 'REJECTED', label: 'Rejected' },
+                  { key: 'CLIENT_NOTIFIED', label: 'Client Notified' },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setProjectRequestFilter(f.key)}
+                    style={{
+                      padding: '0.4rem 0.9rem',
+                      borderRadius: '16px',
+                      border: projectRequestFilter === f.key ? '2px solid var(--brand-green)' : '1px solid #cbd5e1',
+                      background: projectRequestFilter === f.key ? 'var(--brand-green)' : '#ffffff',
+                      color: projectRequestFilter === f.key ? '#ffffff' : '#334155',
+                      fontWeight: 600,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Requests List */}
+            {(() => {
+              const filteredList = projectRequests.filter((r) => {
+                if (projectRequestFilter === 'ALL') return true;
+                return r.status === projectRequestFilter;
+              });
+
+              if (filteredList.length === 0) {
+                return (
+                  <div className="light-panel-card" style={{ textAlign: 'center', padding: '3rem' }}>
+                    <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '0.5rem' }}>📭</span>
+                    <h4>No Project Requests found in this filter</h4>
+                    <p className="text-muted">Requests submitted by clients from their portal will show up here.</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {filteredList.map((req) => {
+                    const isPendingCm = req.status === 'PENDING_CM_REVIEW';
+                    const isForwardedPm = req.status === 'FORWARDED_TO_PM';
+                    const isPmReviewed = req.status === 'PM_REVIEWED';
+                    const isClientNotified = req.status === 'CLIENT_NOTIFIED';
+                    const isApproved = req.status === 'APPROVED';
+                    const isRejected = req.status === 'REJECTED';
+                    const isStarted = req.status === 'PROJECT_STARTED';
+
+                    return (
+                      <div
+                        key={req.id}
+                        className="light-panel-card"
+                        style={{
+                          borderLeft: isStarted
+                            ? '5px solid #10b981'
+                            : isApproved
+                            ? '5px solid #16a34a'
+                            : isRejected
+                            ? '5px solid #ef4444'
+                            : isPmReviewed
+                            ? '5px solid #7c3aed'
+                            : isPendingCm
+                            ? '5px solid #d97706'
+                            : isForwardedPm
+                            ? '5px solid #2563eb'
+                            : '5px solid #16a34a',
+                        }}
+                      >
+                        {/* Header Row */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div>
+                            <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>
+                              {req.category} &nbsp;•&nbsp; Client: <strong>{req.client?.name || 'Client'}</strong> ({req.client?.email || 'N/A'}, {req.client?.phone || 'N/A'})
+                            </span>
+                            <h3 style={{ margin: '0.2rem 0', color: '#0f172a' }}>{req.title}</h3>
+                            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                              📍 {req.location || 'Location not specified'} &nbsp;|&nbsp; Submitted on {formatDate(req.createdAt)}
+                            </p>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            {isPendingCm && <span className="pill-badge warning">Pending CM Review</span>}
+                            {isForwardedPm && <span className="pill-badge active">Forwarded to PM</span>}
+                            {isPmReviewed && <span className="pill-badge active" style={{ background: '#ede9fe', color: '#6d28d9', fontWeight: 700 }}>PM Assessment Complete</span>}
+                            {isClientNotified && <span className="pill-badge completed">Client Notified</span>}
+                            {isApproved && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>✓ Approved (Awaiting PM to Start)</span>}
+                            {isStarted && <span className="pill-badge completed" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700 }}>🚀 Project Started</span>}
+                            {isRejected && <span className="pill-badge error" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>✗ Rejected</span>}
+                          </div>
+                        </div>
+
+                        {/* Specs & Budget Grid */}
+                        <div style={{ display: 'flex', gap: '1.5rem', margin: '1rem 0', flexWrap: 'wrap', background: '#f8fafc', padding: '0.75rem 1rem', borderRadius: '8px' }}>
+                          <div>
+                            <small style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.78rem' }}>Client Expected Budget</small>
+                            <strong style={{ color: 'var(--brand-green)', fontSize: '1.05rem' }}>{req.expectedBudget ? formatMoney(req.expectedBudget) : 'Custom Quote'}</strong>
+                          </div>
+                          {req.targetStartDate && (
+                            <div>
+                              <small style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.78rem' }}>Target Start Date</small>
+                              <strong style={{ color: '#0f172a' }}>{formatDate(req.targetStartDate)}</strong>
+                            </div>
+                          )}
+                          {req.specifications && (
+                            <div style={{ flex: 1, minWidth: '200px' }}>
+                              <small style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.78rem' }}>Client Specifications</small>
+                              <span style={{ color: '#334155', fontSize: '0.9rem' }}>{req.specifications}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <p style={{ margin: '0.5rem 0', color: '#334155', fontSize: '0.92rem', lineHeight: 1.5 }}>
+                          <strong>Requirements:</strong> {req.description}
+                        </p>
+
+                        {/* Attached Photos */}
+                        {req.imageUrls && req.imageUrls.length > 0 && (
+                          <div style={{ margin: '0.75rem 0', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                            <small style={{ color: 'var(--text-muted)', marginRight: '0.25rem' }}>Client Photos / Blueprints ({req.imageUrls.length}):</small>
+                            {req.imageUrls.map((img, idx) => (
+                              <img
+                                key={idx}
+                                src={img}
+                                alt={`Attachment ${idx + 1}`}
+                                style={{ width: '65px', height: '55px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                                onClick={() => setPreviewRequestPhotosModal(req)}
+                              />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Forwarding history note */}
+                        {req.cmNotes && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', background: '#eff6ff', borderLeft: '3px solid #3b82f6', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
+                            <strong style={{ color: '#1d4ed8' }}>Forwarded to PM ({req.forwardedByCm || 'CM'} on {formatDate(req.forwardedToPmAt)}):</strong>
+                            <p style={{ margin: '0.2rem 0 0', color: '#1e3a8a' }}>{req.cmNotes}</p>
+                          </div>
+                        )}
+
+                        {/* PM Technical Assessment */}
+                        {req.pmReply && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#f5f3ff', borderLeft: '3px solid #7c3aed', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
+                              <strong style={{ color: '#6d28d9' }}>🏗️ Project Manager Engineering Review ({req.pmRespondedBy || 'PM'} on {formatDate(req.pmRespondedAt)}):</strong>
+                              {req.pmEstimatedBudget && (
+                                <span style={{ color: '#6d28d9', fontWeight: 700 }}>
+                                  Estimated: {formatMoney(req.pmEstimatedBudget)} {req.pmEstimatedDuration ? `| ${req.pmEstimatedDuration}` : ''}
+                                </span>
+                              )}
+                            </div>
+                            <p style={{ margin: '0.25rem 0 0', color: '#4c1d95', whiteSpace: 'pre-wrap' }}>{req.pmReply}</p>
+                          </div>
+                        )}
+
+                        {/* Rejection reason if rejected */}
+                        {req.rejectionReason && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#fef2f2', borderLeft: '3px solid #ef4444', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
+                            <strong style={{ color: '#b91c1c' }}>Rejection Reason (by {req.rejectedBy || 'Client Manager'} on {formatDate(req.rejectedAt)}):</strong>
+                            <p style={{ margin: '0.2rem 0 0', color: '#7f1d1d' }}>{req.rejectionReason}</p>
+                          </div>
+                        )}
+
+                        {/* Approved notice */}
+                        {isApproved && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#f0fdf4', borderLeft: '3px solid #16a34a', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
+                            <strong style={{ color: '#15803d' }}>✓ Approved by {req.approvedBy || 'Client Manager'} on {formatDate(req.approvedAt)}</strong>
+                            <p style={{ margin: '0.2rem 0 0', color: '#166534' }}>Awaiting Project Manager to initialize and assign client to the new construction project.</p>
+                          </div>
+                        )}
+
+                        {/* Project started notice */}
+                        {isStarted && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#ecfdf5', borderLeft: '3px solid #10b981', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
+                            <strong style={{ color: '#047857' }}>🚀 Project Initialized by Project Manager (Project ID #{req.startedProjectId})</strong>
+                            <p style={{ margin: '0.2rem 0 0', color: '#065f46' }}>Construction project is underway and client is assigned.</p>
+                          </div>
+                        )}
+
+                        {/* Official Response sent to client */}
+                        {req.clientMessage && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#f0fdf4', borderLeft: '3px solid #16a34a', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
+                              <strong style={{ color: '#15803d' }}>✉️ Official Message Delivered to Client on {formatDate(req.clientNotifiedAt)}:</strong>
+                              <small style={{ color: 'var(--text-muted)' }}>By {req.clientNotifiedBy || 'Client Manager'}</small>
+                            </div>
+                            <p style={{ margin: '0.25rem 0 0', color: '#14532d', whiteSpace: 'pre-wrap' }}>{req.clientMessage}</p>
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '0.85rem' }}>
+                          {!isApproved && !isStarted && !isRejected && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-solid-green"
+                                style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', background: '#16a34a' }}
+                                onClick={() => handleOpenApproveModal(req)}
+                              >
+                                ✓ Approve Request
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-outline-green"
+                                style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem', borderColor: '#ef4444', color: '#ef4444' }}
+                                onClick={() => handleOpenRejectModal(req)}
+                              >
+                                ✗ Reject Request
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            type="button"
+                            className="btn-outline-green"
+                            style={{ padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}
+                            onClick={() => handleOpenForwardModal(req)}
+                          >
+                            {req.status === 'FORWARDED_TO_PM' ? 'Update Forward to PM' : 'Forward to PM →'}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn-outline-green"
+                            style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
+                            onClick={() => handleOpenClientNotifyModal(req)}
+                          >
+                            {req.status === 'CLIENT_NOTIFIED' ? 'Update Client Response' : 'Send Response ✉️'}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn-outline-green"
+                            style={{ padding: '0.45rem 0.75rem', fontSize: '0.85rem', borderColor: '#ef4444', color: '#ef4444' }}
+                            onClick={() => handleDeleteProjectRequest(req)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2434,6 +2929,220 @@ export default function ClientManagerDashboard() {
               </div>
               <div className="modal-actions-row">
                 <button type="button" className="btn-solid-green" onClick={() => setReceiptPreviewModal(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* FORWARD TO PM MODAL */}
+        {forwardModalOpen && forwardTarget && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '640px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>FORWARD TO ENGINEERING TEAM</span>
+                  <h3 style={{ margin: '0.2rem 0 0' }}>Forward to Project Manager: {forwardTarget.title}</h3>
+                </div>
+                <button type="button" onClick={() => { setForwardModalOpen(false); setForwardTarget(null); }}>✕</button>
+              </div>
+
+              <form onSubmit={handleSubmitForward} style={{ marginTop: '1.25rem' }}>
+                <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #e2e8f0', fontSize: '0.88rem' }}>
+                  <p style={{ margin: '0 0 0.35rem' }}><strong>Client:</strong> {forwardTarget.client?.name} ({forwardTarget.client?.email})</p>
+                  <p style={{ margin: '0 0 0.35rem' }}><strong>Category:</strong> {forwardTarget.category} &nbsp;|&nbsp; <strong>Location:</strong> {forwardTarget.location}</p>
+                  <p style={{ margin: '0 0 0.35rem' }}><strong>Client Expected Budget:</strong> {forwardTarget.expectedBudget ? formatMoney(forwardTarget.expectedBudget) : 'N/A'}</p>
+                  {forwardTarget.imageUrls && forwardTarget.imageUrls.length > 0 && (
+                    <p style={{ margin: 0, color: 'var(--brand-green)', fontWeight: 600 }}>📸 {forwardTarget.imageUrls.length} Photos/Drawings Attached</p>
+                  )}
+                </div>
+
+                <div className="form-input-box">
+                  <label>Instructions &amp; Forwarding Notes for Project Manager *</label>
+                  <textarea
+                    rows={4}
+                    value={forwardCmNotes}
+                    onChange={(e) => setForwardCmNotes(e.target.value)}
+                    placeholder="Specify what technical feedback, cost estimates, or soil/site checks the PM should provide..."
+                    required
+                  />
+                </div>
+
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.5rem', fontSize: '0.82rem' }}>
+                  This request will be assigned to the Project Manager workspace under "Client Project Requests".
+                </small>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setForwardModalOpen(false); setForwardTarget(null); }}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={submittingForward}>
+                    {submittingForward ? 'Forwarding to PM...' : 'Confirm & Forward to PM'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* SEND RESPONSE TO CLIENT MODAL */}
+        {clientNotifyModalOpen && clientNotifyTarget && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '680px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>CLIENT OFFICIAL PROPOSAL DISPATCH</span>
+                  <h3 style={{ margin: '0.2rem 0 0' }}>Send Official Response to: {clientNotifyTarget.client?.name}</h3>
+                </div>
+                <button type="button" onClick={() => { setClientNotifyModalOpen(false); setClientNotifyTarget(null); }}>✕</button>
+              </div>
+
+              <form onSubmit={handleSubmitClientNotify} style={{ marginTop: '1.25rem' }}>
+                <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #e2e8f0', fontSize: '0.88rem' }}>
+                  <p style={{ margin: '0 0 0.35rem' }}><strong>Project:</strong> {clientNotifyTarget.title} ({clientNotifyTarget.category})</p>
+                  {clientNotifyTarget.pmReply && (
+                    <div style={{ marginTop: '0.5rem', padding: '0.6rem 0.85rem', background: '#f5f3ff', borderLeft: '3px solid #7c3aed', borderRadius: '4px' }}>
+                      <strong style={{ color: '#6d28d9', fontSize: '0.82rem' }}>PM Engineering Feedback ({clientNotifyTarget.pmRespondedBy}):</strong>
+                      <p style={{ margin: '0.2rem 0 0', color: '#4c1d95', fontSize: '0.85rem' }}>{clientNotifyTarget.pmReply}</p>
+                      {clientNotifyTarget.pmEstimatedBudget && (
+                        <p style={{ margin: '0.3rem 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
+                          PM Est. Cost: {formatMoney(clientNotifyTarget.pmEstimatedBudget)} {clientNotifyTarget.pmEstimatedDuration ? `| Duration: ${clientNotifyTarget.pmEstimatedDuration}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="form-input-box">
+                  <label>Official Proposal &amp; Response Message *</label>
+                  <textarea
+                    rows={7}
+                    value={clientNotifyMessage}
+                    onChange={(e) => setClientNotifyMessage(e.target.value)}
+                    placeholder="Compose the official response, quotation, next steps, and site meeting invitation..."
+                    required
+                  />
+                </div>
+
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.5rem', fontSize: '0.82rem' }}>
+                  This will update the client portal with the proposal message and send a real-time notification alert to their account.
+                </small>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setClientNotifyModalOpen(false); setClientNotifyTarget(null); }}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={submittingClientNotify}>
+                    {submittingClientNotify ? 'Dispatching Response...' : 'Send Response & Notify Client ✉️'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* APPROVE PROJECT REQUEST MODAL */}
+        {approveModalOpen && approveTarget && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '520px' }}>
+              <div className="modal-head-row">
+                <h3 style={{ color: '#166534' }}>✓ Approve Project Request</h3>
+                <button type="button" onClick={() => { setApproveModalOpen(false); setApproveTarget(null); }}>✕</button>
+              </div>
+              <form onSubmit={handleConfirmApprove} style={{ marginTop: '1rem' }}>
+                <div className="modal-body-content">
+                  <div style={{ background: '#f0fdf4', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '1rem' }}>
+                    <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: '#166534' }}>{approveTarget.title}</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#14532d' }}>
+                      Client: <strong>{approveTarget.client?.name}</strong> &nbsp;|&nbsp; Category: <strong>{approveTarget.category}</strong>
+                    </p>
+                  </div>
+                  <p style={{ margin: '0 0 1rem', fontSize: '0.9rem', color: '#334155', lineHeight: 1.5 }}>
+                    Approving this request authorizes the <strong>Project Manager</strong> to start and initialize the new construction project for this client.
+                  </p>
+                  <div className="form-input-box">
+                    <label>Approval Message / Note for Client &amp; PM (Optional)</label>
+                    <textarea
+                      rows={3}
+                      value={approveNotes}
+                      onChange={(e) => setApproveNotes(e.target.value)}
+                      placeholder="Enter any confirmation message or notes..."
+                    />
+                  </div>
+                </div>
+                <div className="modal-actions-row" style={{ marginTop: '1.25rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setApproveModalOpen(false); setApproveTarget(null); }} disabled={submittingApprove}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={submittingApprove} style={{ background: '#16a34a' }}>
+                    {submittingApprove ? 'Approving...' : '✓ Confirm Approval'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* REJECT PROJECT REQUEST MODAL */}
+        {rejectModalOpen && rejectTarget && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '520px' }}>
+              <div className="modal-head-row">
+                <h3 style={{ color: '#b91c1c' }}>✗ Reject Project Request</h3>
+                <button type="button" onClick={() => { setRejectModalOpen(false); setRejectTarget(null); }}>✕</button>
+              </div>
+              <form onSubmit={handleConfirmReject} style={{ marginTop: '1rem' }}>
+                <div className="modal-body-content">
+                  <div style={{ background: '#fef2f2', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #fecaca', marginBottom: '1rem' }}>
+                    <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: '#991b1b' }}>{rejectTarget.title}</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#7f1d1d' }}>
+                      Client: <strong>{rejectTarget.client?.name}</strong> &nbsp;|&nbsp; Category: <strong>{rejectTarget.category}</strong>
+                    </p>
+                  </div>
+                  <div className="form-input-box">
+                    <label>Reason for Rejection *</label>
+                    <textarea
+                      rows={4}
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder="Please specify why this project request is being rejected..."
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="modal-actions-row" style={{ marginTop: '1.25rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setRejectModalOpen(false); setRejectTarget(null); }} disabled={submittingReject}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={submittingReject} style={{ background: '#dc2626' }}>
+                    {submittingReject ? 'Rejecting...' : '✗ Confirm Rejection'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* PHOTO PREVIEW MODAL FOR CM */}
+        {previewRequestPhotosModal && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '750px' }}>
+              <div className="modal-head-row">
+                <h3>Photos / Drawings — {previewRequestPhotosModal.title}</h3>
+                <button type="button" onClick={() => setPreviewRequestPhotosModal(null)}>✕</button>
+              </div>
+              <div className="modal-body-content" style={{ marginTop: '1rem' }}>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                  Client: <b>{previewRequestPhotosModal.client?.name}</b> | Category: <b>{previewRequestPhotosModal.category}</b>
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
+                  {(previewRequestPhotosModal.imageUrls || []).map((img, idx) => (
+                    <a key={idx} href={img} target="_blank" rel="noopener noreferrer">
+                      <img src={img} alt={`Drawing ${idx + 1}`} style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                    </a>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                <button type="button" className="btn-solid-green" onClick={() => setPreviewRequestPhotosModal(null)}>Close</button>
               </div>
             </div>
           </div>

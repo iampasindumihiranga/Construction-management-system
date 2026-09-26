@@ -84,9 +84,11 @@ export default function Navbar({ onSelectCategory }) {
 
           {/* Quick Dashboard link if logged in */}
           {isClient && (
-            <Link to="/client" className="nav-link-item highlight">
-              My Client Portal
-            </Link>
+            <>
+              <Link to="/client" className="nav-link-item highlight">
+                My Client Portal
+              </Link>
+            </>
           )}
 
           {isEmployee && (

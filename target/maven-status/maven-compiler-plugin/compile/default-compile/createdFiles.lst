@@ -19,8 +19,10 @@ com\construction\repository\ClientRepository.class
 com\construction\repository\MaterialTransactionRepository.class
 com\construction\service\AuthService$StaffAccountConfig.class
 com\construction\model\Contract.class
+com\construction\service\ProjectRequestService.class
 com\construction\model\ClientFeedback.class
 com\construction\model\MaterialTransaction.class
+com\construction\controller\ProjectRequestController.class
 com\construction\model\ClientNotification.class
 com\construction\service\ClientFeedbackService.class
 com\construction\controller\EmployeeController.class
@@ -39,6 +41,7 @@ com\construction\repository\ClientNotificationRepository.class
 com\construction\service\ClientNotificationService.class
 com\construction\model\Employee.class
 com\construction\repository\ClientFeedbackRepository.class
+com\construction\model\ProjectRequest.class
 com\construction\service\DownPaymentService.class
 com\construction\repository\PurchaseOrderRepository.class
 com\construction\model\Project.class
@@ -63,6 +66,7 @@ com\construction\repository\DownPaymentRepository.class
 com\construction\service\AuthService.class
 com\construction\controller\ClientController.class
 com\construction\exception\ConflictException.class
+com\construction\repository\ProjectRequestRepository.class
 com\construction\controller\ContractController.class
 com\construction\service\EmployeeService.class
 com\construction\controller\AuthController.class

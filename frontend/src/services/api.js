@@ -155,6 +155,37 @@ export const respondToInquiry = (id, response, respondedBy = 'Client Manager') =
 });
 export const deleteInquiry = (id) => request(`/api/inquiries/${id}`, { method: 'DELETE' });
 
+// Custom Project Requests (CM-PM-Client Workflow)
+export const getProjectRequests = (clientId) => request(`/api/project-requests${clientId ? `?clientId=${clientId}` : ''}`);
+export const getForwardedProjectRequests = () => request('/api/project-requests/forwarded-to-pm');
+export const getProjectRequestById = (id) => request(`/api/project-requests/${id}`);
+export const createProjectRequest = (data) => request('/api/project-requests', { method: 'POST', body: data });
+export const forwardProjectRequestToPm = (id, cmNotes, forwardedByCm = 'Client Manager') => request(`/api/project-requests/${id}/forward-to-pm`, {
+  method: 'PUT',
+  body: { cmNotes, forwardedByCm },
+});
+export const pmReplyProjectRequest = (id, payload) => request(`/api/project-requests/${id}/pm-reply`, {
+  method: 'PUT',
+  body: payload,
+});
+export const sendProjectRequestResponseToClient = (id, clientMessage, clientNotifiedBy = 'Client Manager') => request(`/api/project-requests/${id}/send-to-client`, {
+  method: 'PUT',
+  body: { clientMessage, clientNotifiedBy },
+});
+export const approveProjectRequest = (id, payload = {}) => request(`/api/project-requests/${id}/approve`, {
+  method: 'PUT',
+  body: payload,
+});
+export const rejectProjectRequest = (id, payload = {}) => request(`/api/project-requests/${id}/reject`, {
+  method: 'PUT',
+  body: payload,
+});
+export const startProjectFromRequest = (id, projectData = {}, startedBy = 'Project Manager') => request(`/api/project-requests/${id}/start-project?startedBy=${encodeURIComponent(startedBy)}`, {
+  method: 'POST',
+  body: projectData,
+});
+export const deleteProjectRequest = (id) => request(`/api/project-requests/${id}`, { method: 'DELETE' });
+
 // Documents Vault (US-CM-19, 20, 21, 22)
 export const getDocuments = (params = {}) => {
   const query = new URLSearchParams();

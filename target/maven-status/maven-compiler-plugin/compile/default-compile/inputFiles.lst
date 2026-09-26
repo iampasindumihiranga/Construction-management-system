@@ -19,6 +19,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\Invento
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ProjectController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ProjectDocumentController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ProjectManagementController.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ProjectRequestController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\enums\ProjectStatus.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\enums\PropertyCategory.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\exception\ApiError.java
@@ -41,6 +42,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Project.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectDocument.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectExpense.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectMilestone.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectRequest.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectTask.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\PurchaseOrder.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\StockAlert.java
@@ -60,6 +62,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\Project
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ProjectExpenseRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ProjectMilestoneRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ProjectRepository.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ProjectRequestRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ProjectTaskRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\PurchaseOrderRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\StockAlertRepository.java
@@ -76,4 +79,5 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\InventoryS
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\PasswordService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ProjectDocumentService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ProjectManagementService.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ProjectRequestService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ProjectService.java

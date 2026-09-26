@@ -109,11 +109,16 @@ public class DownPaymentService {
                 (status != null && !status.isBlank()) ? status.trim() : null
         );
 
-        // Ensure dynamic status is accurately reflected on all records
+        // Ensure dynamic status is accurately reflected on date-based records
         for (DownPayment payment : payments) {
-            String currentStatus = payment.calculateStatus();
-            if (currentStatus != null && !currentStatus.equalsIgnoreCase(payment.getStatus())) {
-                payment.setStatus(currentStatus);
+            if (payment.getStatus() == null ||
+                payment.getStatus().equalsIgnoreCase("Valid") ||
+                payment.getStatus().equalsIgnoreCase("Expiring Soon") ||
+                payment.getStatus().equalsIgnoreCase("Expired")) {
+                String currentStatus = payment.calculateStatus();
+                if (currentStatus != null) {
+                    payment.setStatus(currentStatus);
+                }
             }
         }
         return payments;
@@ -134,7 +139,12 @@ public class DownPaymentService {
     public DownPayment findById(Long id) {
         DownPayment payment = downPaymentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Down payment not found with id " + id));
-        payment.setStatus(payment.calculateStatus());
+        if (payment.getStatus() == null ||
+            payment.getStatus().equalsIgnoreCase("Valid") ||
+            payment.getStatus().equalsIgnoreCase("Expiring Soon") ||
+            payment.getStatus().equalsIgnoreCase("Expired")) {
+            payment.setStatus(payment.calculateStatus());
+        }
         return payment;
     }
 
@@ -185,8 +195,11 @@ public class DownPaymentService {
             existing.setReferenceNumber(payment.getReferenceNumber());
         }
 
-        // Automatically calculate status: Valid, Expiring Soon, or Expired
-        existing.setStatus(existing.calculateStatus());
+        if (payment.getStatus() != null && !payment.getStatus().isBlank()) {
+            existing.setStatus(payment.getStatus().trim());
+        } else {
+            existing.setStatus(existing.calculateStatus());
+        }
 
         DownPayment saved = downPaymentRepository.save(existing);
 
@@ -203,9 +216,10 @@ public class DownPaymentService {
     }
 
     public DownPayment updateStatus(Long id, String status) {
-        DownPayment existing = findById(id);
+        DownPayment existing = downPaymentRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Down payment not found with id " + id));
         String oldStatus = existing.getStatus();
-        existing.setStatus(status);
+        existing.setStatus(status != null ? status.trim() : "Valid");
         DownPayment saved = downPaymentRepository.save(existing);
 
         if (!status.equalsIgnoreCase(oldStatus)) {

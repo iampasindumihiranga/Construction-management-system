@@ -89,10 +89,12 @@ public class DownPayment {
     @PrePersist
     @PreUpdate
     public void onPersistOrUpdate() {
-        if (this.paymentDate != null) {
+        if (this.paymentDate != null && this.validUntil == null) {
             this.validUntil = this.paymentDate.plusDays(60);
         }
-        this.status = calculateStatus();
+        if (this.status == null || this.status.isBlank()) {
+            this.status = calculateStatus();
+        }
     }
 
     /**
@@ -155,8 +157,12 @@ public class DownPayment {
     public void setPaymentDate(LocalDate paymentDate) {
         this.paymentDate = paymentDate;
         if (paymentDate != null) {
-            this.validUntil = paymentDate.plusDays(60);
-            this.status = calculateStatus();
+            if (this.validUntil == null) {
+                this.validUntil = paymentDate.plusDays(60);
+            }
+            if (this.status == null || this.status.isBlank()) {
+                this.status = calculateStatus();
+            }
         }
     }
 
@@ -188,11 +194,7 @@ public class DownPayment {
     }
 
     public String getStatus() {
-        // Automatically returns dynamic status based on 60-day validity
-        if (this.paymentDate != null) {
-            return calculateStatus();
-        }
-        return status != null ? status : "Valid";
+        return this.status != null ? this.status : calculateStatus();
     }
 
     public void setStatus(String status) {

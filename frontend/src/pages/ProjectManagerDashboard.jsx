@@ -18,6 +18,9 @@ import {
   getProjectManagementSummary,
   getProjects,
   getTasks,
+  getForwardedProjectRequests,
+  pmReplyProjectRequest,
+  startProjectFromRequest,
   updateProject,
   updateTask,
 } from '../services/api';
@@ -107,31 +110,154 @@ export default function ProjectManagerDashboard() {
   const [assignedProjectIds, setAssignedProjectIds] = useState([]);
   const [savingEmpAssign, setSavingEmpAssign] = useState(false);
 
+  // Client Custom Project Requests (Forwarded by Client Manager)
+  const [forwardedRequests, setForwardedRequests] = useState([]);
+  const [pmReplyModalOpen, setPmReplyModalOpen] = useState(false);
+  const [pmReplyTarget, setPmReplyTarget] = useState(null);
+  const [pmReplyForm, setPmReplyForm] = useState({
+    pmReply: '',
+    pmEstimatedBudget: '',
+    pmEstimatedDuration: '',
+  });
+  const [submittingPmReply, setSubmittingPmReply] = useState(false);
+  const [pmPreviewPhotosModal, setPmPreviewPhotosModal] = useState(null);
+
+  // Start Project from Approved Request Modal
+  const [startProjectModalOpen, setStartProjectModalOpen] = useState(false);
+  const [startProjectTarget, setStartProjectTarget] = useState(null);
+  const [startProjectForm, setStartProjectForm] = useState({
+    name: '',
+    description: '',
+    category: 'RESIDENCIES',
+    location: '',
+    budget: '',
+    startDate: '',
+    endDate: '',
+  });
+  const [startingProject, setStartingProject] = useState(false);
+
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
 
   const refresh = async () => {
     try {
-      const [nextSummary, nextProjects, nextClients, nextEmployees, nextTasks, nextExpenses] = await Promise.all([
+      const results = await Promise.allSettled([
         getProjectManagementSummary(),
         getProjects({ realOnly: true }),
         getClients(),
         getAllEmployees(),
         getTasks(),
         getExpenses(),
+        getForwardedProjectRequests(),
       ]);
-      setSummary(nextSummary || {});
-      setProjects(nextProjects || []);
-      setClients(nextClients || []);
-      setEmployees(nextEmployees || []);
-      setTasks(nextTasks || []);
-      setExpenses(nextExpenses || []);
 
-      if (!selectedProjectId && nextProjects && nextProjects.length > 0) {
+      const [sumRes, projRes, clientRes, empRes, taskRes, expRes, reqRes] = results;
+      const nextSummary = sumRes.status === 'fulfilled' ? sumRes.value : {};
+      const nextProjects = projRes.status === 'fulfilled' ? projRes.value || [] : [];
+      const nextClients = clientRes.status === 'fulfilled' ? clientRes.value || [] : [];
+      const nextEmployees = empRes.status === 'fulfilled' ? empRes.value || [] : [];
+      const nextTasks = taskRes.status === 'fulfilled' ? taskRes.value || [] : [];
+      const nextExpenses = expRes.status === 'fulfilled' ? expRes.value || [] : [];
+      const nextRequests = reqRes.status === 'fulfilled' ? reqRes.value || [] : [];
+
+      setSummary(nextSummary || {});
+      setProjects(nextProjects);
+      setClients(nextClients);
+      setEmployees(nextEmployees);
+      setTasks(nextTasks);
+      setExpenses(nextExpenses);
+      setForwardedRequests(nextRequests);
+
+      if (!selectedProjectId && nextProjects.length > 0) {
         setSelectedProjectId(String(nextProjects[0].id));
       }
+      setError('');
     } catch (err) {
       setError(err.message || 'Unable to load project management data.');
+    }
+  };
+
+  const handleOpenPmReplyModal = (request) => {
+    setPmReplyTarget(request);
+    setPmReplyForm({
+      pmReply: request.pmReply || '',
+      pmEstimatedBudget: request.pmEstimatedBudget ? String(request.pmEstimatedBudget) : (request.expectedBudget ? String(request.expectedBudget) : ''),
+      pmEstimatedDuration: request.pmEstimatedDuration || '8 - 10 Months',
+    });
+    setPmReplyModalOpen(true);
+  };
+
+  const handleSubmitPmReply = async (e) => {
+    e.preventDefault();
+    if (!pmReplyTarget || !pmReplyForm.pmReply.trim()) return;
+    setSubmittingPmReply(true);
+    setError('');
+    try {
+      await pmReplyProjectRequest(pmReplyTarget.id, {
+        pmReply: pmReplyForm.pmReply.trim(),
+        pmEstimatedBudget: pmReplyForm.pmEstimatedBudget ? Number(pmReplyForm.pmEstimatedBudget) : null,
+        pmEstimatedDuration: pmReplyForm.pmEstimatedDuration.trim() || null,
+        pmRespondedBy: 'Project Manager',
+      });
+      setNotice(`Engineering assessment & reply submitted for "${pmReplyTarget.title}". Transmitted to Client Manager.`);
+      setPmReplyModalOpen(false);
+      setPmReplyTarget(null);
+      await refresh();
+      setTimeout(() => setNotice(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to submit PM reply');
+    } finally {
+      setSubmittingPmReply(false);
+    }
+  };
+
+  const handleOpenStartProjectModal = (request) => {
+    setStartProjectTarget(request);
+    const budgetVal = request.pmEstimatedBudget || request.expectedBudget || 1000000;
+    const startVal = request.targetStartDate ? request.targetStartDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    setStartProjectForm({
+      name: request.title,
+      description: request.description || '',
+      category: request.category || 'RESIDENCIES',
+      location: request.location || '',
+      budget: String(budgetVal),
+      startDate: startVal,
+      endDate: '',
+    });
+    setStartProjectModalOpen(true);
+  };
+
+  const handleConfirmStartProject = async (e) => {
+    e.preventDefault();
+    if (!startProjectTarget) return;
+    setStartingProject(true);
+    setError('');
+    try {
+      const payload = {
+        name: startProjectForm.name.trim(),
+        description: startProjectForm.description.trim(),
+        category: startProjectForm.category,
+        location: startProjectForm.location.trim(),
+        budget: Number(startProjectForm.budget) || 1000000,
+        startDate: startProjectForm.startDate,
+        endDate: startProjectForm.endDate || null,
+        status: 'IN_PROGRESS',
+        imageUrls: startProjectTarget.imageUrls || [],
+      };
+      const createdProj = await startProjectFromRequest(startProjectTarget.id, payload, 'Project Manager');
+      setNotice(`Project "${startProjectForm.name}" successfully started and assigned to client ${startProjectTarget.client?.name}!`);
+      setStartProjectModalOpen(false);
+      setStartProjectTarget(null);
+      await refresh();
+      if (createdProj && createdProj.id) {
+        setSelectedProjectId(String(createdProj.id));
+      }
+      setTab('projects');
+      setTimeout(() => setNotice(''), 5000);
+    } catch (err) {
+      setError(err.message || 'Failed to start and assign project');
+    } finally {
+      setStartingProject(false);
     }
   };
 
@@ -450,6 +576,9 @@ export default function ProjectManagerDashboard() {
           <button onClick={() => setTab('overview')} className={tab === 'overview' ? 'active' : ''}>
             Overview
           </button>
+          <button onClick={() => setTab('requests')} className={tab === 'requests' ? 'active' : ''}>
+            Client Requests ({forwardedRequests.filter((r) => r.status === 'FORWARDED_TO_PM').length > 0 ? `${forwardedRequests.length} (${forwardedRequests.filter((r) => r.status === 'FORWARDED_TO_PM').length} Pending)` : forwardedRequests.length})
+          </button>
           <button onClick={startProject} className={tab === 'projects' ? 'active' : ''}>
             Projects
           </button>
@@ -500,6 +629,233 @@ export default function ProjectManagerDashboard() {
               />
             </section>
           </>
+        )}
+
+        {/* TAB: CLIENT PROJECT REQUESTS (Forwarded by Client Manager) */}
+        {tab === 'requests' && (
+          <section className="pm-card">
+            <div className="pm-card-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2>Client Custom Project Requests</h2>
+                <p>Engineering feasibility reviews and assessments requested by Client Management.</p>
+              </div>
+              <span className="pill-badge active" style={{ fontSize: '0.85rem' }}>
+                {forwardedRequests.filter((r) => r.status === 'FORWARDED_TO_PM').length} Pending Technical Review
+              </span>
+            </div>
+
+            {forwardedRequests.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                <span style={{ fontSize: '3rem', display: 'block', marginBottom: '0.5rem' }}>📋</span>
+                <h3>No Client Requests Forwarded</h3>
+                <p>When the Client Manager forwards custom design requests, they will appear here for engineering assessment.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginTop: '1rem' }}>
+                {forwardedRequests.map((req) => {
+                  const isAwaitingPm = req.status === 'FORWARDED_TO_PM';
+                  const isPmReviewed = req.status === 'PM_REVIEWED';
+                  const isClientNotified = req.status === 'CLIENT_NOTIFIED';
+                  const isApproved = req.status === 'APPROVED';
+                  const isRejected = req.status === 'REJECTED';
+                  const isStarted = req.status === 'PROJECT_STARTED';
+
+                  return (
+                    <div
+                      key={req.id}
+                      style={{
+                        background: '#ffffff',
+                        border: isStarted
+                          ? '2px solid #10b981'
+                          : isApproved
+                          ? '2px solid #16a34a'
+                          : isAwaitingPm
+                          ? '2px solid #f59e0b'
+                          : '1px solid #e2e8f0',
+                        borderRadius: '10px',
+                        padding: '1.35rem',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                      }}
+                    >
+                      {/* Top Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--brand-green)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            {req.category} &nbsp;•&nbsp; Client: {req.client?.name || 'Valued Client'} ({req.client?.email || 'N/A'}, {req.client?.phone || 'N/A'})
+                          </span>
+                          <h3 style={{ margin: '0.2rem 0', color: '#0f172a', fontSize: '1.25rem' }}>{req.title}</h3>
+                          <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
+                            📍 Location: <strong>{req.location || 'N/A'}</strong> &nbsp;|&nbsp; Target Start: <strong>{req.targetStartDate ? formatDate(req.targetStartDate) : 'Flexible'}</strong>
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          {isAwaitingPm && (
+                            <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#fef3c7', color: '#b45309', fontWeight: 700, fontSize: '0.82rem' }}>
+                              ⚠️ Action Needed (Reply to CM)
+                            </span>
+                          )}
+                          {isPmReviewed && (
+                            <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#eff6ff', color: '#1e40af', fontWeight: 600, fontSize: '0.82rem' }}>
+                              ✓ Engineering Review Submitted
+                            </span>
+                          )}
+                          {isClientNotified && (
+                            <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#f0fdf4', color: '#16a34a', fontWeight: 600, fontSize: '0.82rem' }}>
+                              ✓ Client Notified by CM
+                            </span>
+                          )}
+                          {isApproved && (
+                            <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#dcfce7', color: '#166534', fontWeight: 700, fontSize: '0.82rem' }}>
+                              ✓ Approved by Client Manager — Ready to Start
+                            </span>
+                          )}
+                          {isStarted && (
+                            <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700, fontSize: '0.82rem' }}>
+                              🚀 Project Started (ID #{req.startedProjectId})
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#fee2e2', color: '#b91c1c', fontWeight: 700, fontSize: '0.82rem' }}>
+                              ✗ Rejected
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Budget & Specs Strip */}
+                      <div style={{ display: 'flex', gap: '1.5rem', margin: '0.9rem 0', flexWrap: 'wrap', background: '#f8fafc', padding: '0.75rem 1rem', borderRadius: '8px' }}>
+                        <div>
+                          <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>Client Expected Budget</small>
+                          <strong style={{ color: 'var(--brand-green)', fontSize: '1.05rem' }}>
+                            {req.expectedBudget ? formatMoney(req.expectedBudget) : 'Custom Quote'}
+                          </strong>
+                        </div>
+                        {req.specifications && (
+                          <div style={{ flex: 1, minWidth: '220px' }}>
+                            <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>Specifications</small>
+                            <span style={{ color: '#334155', fontSize: '0.9rem' }}>{req.specifications}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <p style={{ margin: '0.5rem 0', color: '#334155', fontSize: '0.92rem', lineHeight: 1.5 }}>
+                        <strong>Client Requirements:</strong> {req.description}
+                      </p>
+
+                      {/* Attached Blueprints & Drawings */}
+                      {req.imageUrls && req.imageUrls.length > 0 && (
+                        <div style={{ margin: '0.85rem 0', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <small style={{ color: '#64748b', marginRight: '0.25rem' }}>Attached Drawings / Photos ({req.imageUrls.length}):</small>
+                          {req.imageUrls.map((img, idx) => (
+                            <img
+                              key={idx}
+                              src={img}
+                              alt={`Plan ${idx + 1}`}
+                              style={{ width: '65px', height: '55px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                              onClick={() => setPmPreviewPhotosModal(req)}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Client Manager's Forwarding Notes */}
+                      {req.cmNotes && (
+                        <div style={{ marginTop: '0.85rem', padding: '0.75rem 1rem', background: '#eff6ff', borderLeft: '4px solid #3b82f6', borderRadius: '0 8px 8px 0', fontSize: '0.88rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                            <strong style={{ color: '#1d4ed8' }}>💬 Client Manager Instructions ({req.forwardedByCm || 'CM'}):</strong>
+                            <small style={{ color: '#64748b' }}>{formatDate(req.forwardedToPmAt)}</small>
+                          </div>
+                          <p style={{ margin: 0, color: '#1e3a8a' }}>{req.cmNotes}</p>
+                        </div>
+                      )}
+
+                      {/* Your Engineering Review (if already replied) */}
+                      {req.pmReply && (
+                        <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#f5f3ff', borderLeft: '4px solid #7c3aed', borderRadius: '0 8px 8px 0', fontSize: '0.88rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
+                            <strong style={{ color: '#6d28d9' }}>✓ Your Engineering Assessment &amp; Feasibility ({formatDate(req.pmRespondedAt)}):</strong>
+                            {req.pmEstimatedBudget && (
+                              <span style={{ color: '#6d28d9', fontWeight: 700 }}>
+                                Est. Budget: {formatMoney(req.pmEstimatedBudget)} {req.pmEstimatedDuration ? `| Timeline: ${req.pmEstimatedDuration}` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <p style={{ margin: 0, color: '#4c1d95', whiteSpace: 'pre-wrap' }}>{req.pmReply}</p>
+                        </div>
+                      )}
+
+                      {/* Approved notice */}
+                      {isApproved && (
+                        <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#f0fdf4', borderLeft: '4px solid #16a34a', borderRadius: '0 8px 8px 0', fontSize: '0.9rem' }}>
+                          <strong style={{ color: '#15803d' }}>✓ Approved by Client Manager ({req.approvedBy || 'CM'} on {formatDate(req.approvedAt)})</strong>
+                          <p style={{ margin: '0.2rem 0 0', color: '#166534' }}>
+                            This custom request has been approved! You can now start the construction project and assign this client.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Started notice */}
+                      {isStarted && (
+                        <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#ecfdf5', borderLeft: '4px solid #10b981', borderRadius: '0 8px 8px 0', fontSize: '0.9rem' }}>
+                          <strong style={{ color: '#047857' }}>🚀 Construction Project Initialized &amp; Assigned</strong>
+                          <p style={{ margin: '0.2rem 0 0', color: '#065f46' }}>
+                            Project ID #{req.startedProjectId} is actively managed under Projects. Client {req.client?.name} is assigned.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Rejection notice */}
+                      {req.rejectionReason && (
+                        <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#fef2f2', borderLeft: '4px solid #ef4444', borderRadius: '0 8px 8px 0', fontSize: '0.9rem' }}>
+                          <strong style={{ color: '#b91c1c' }}>Rejection Reason (by {req.rejectedBy || 'CM'} on {formatDate(req.rejectedAt)}):</strong>
+                          <p style={{ margin: '0.2rem 0 0', color: '#7f1d1d' }}>{req.rejectionReason}</p>
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.75rem', borderTop: '1px solid #f1f5f9', paddingTop: '0.85rem', flexWrap: 'wrap' }}>
+                        {isApproved && (
+                          <button
+                            type="button"
+                            className="pm-btn primary"
+                            style={{ padding: '0.6rem 1.4rem', fontSize: '0.92rem', background: '#16a34a', borderColor: '#16a34a', fontWeight: 700 }}
+                            onClick={() => handleOpenStartProjectModal(req)}
+                          >
+                            🚀 Start Project (Assign Client)
+                          </button>
+                        )}
+
+                        {isStarted && (
+                          <button
+                            type="button"
+                            className="pm-btn secondary"
+                            style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
+                            onClick={() => {
+                              setSelectedProjectId(String(req.startedProjectId));
+                              setTab('projects');
+                            }}
+                          >
+                            View Assigned Project #{req.startedProjectId} →
+                          </button>
+                        )}
+
+                        {!isStarted && (
+                          <button
+                            type="button"
+                            className="pm-btn secondary"
+                            style={{ padding: '0.55rem 1.25rem', fontSize: '0.9rem' }}
+                            onClick={() => handleOpenPmReplyModal(req)}
+                          >
+                            {req.pmReply ? 'Update Technical Reply' : 'Review & Reply to Client Manager →'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         )}
 
         {/* TAB 2: PROJECTS */}
@@ -1189,6 +1545,221 @@ export default function ProjectManagerDashboard() {
                   <EmptyState message="No team members assigned to this project yet. Use the form or 'Assign Employees' tab to allocate staff." />
                 )}
               </FormCard>
+            </div>
+          </div>
+        )}
+        {/* PM TECHNICAL REPLY MODAL */}
+        {pmReplyModalOpen && pmReplyTarget && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '650px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>PROJECT ENGINEERING ASSESSMENT</span>
+                  <h3 style={{ margin: '0.2rem 0 0' }}>Technical Reply for: {pmReplyTarget.title}</h3>
+                </div>
+                <button type="button" onClick={() => { setPmReplyModalOpen(false); setPmReplyTarget(null); }}>✕</button>
+              </div>
+
+              <form onSubmit={handleSubmitPmReply} style={{ marginTop: '1.25rem' }}>
+                <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #e2e8f0', fontSize: '0.88rem' }}>
+                  <p style={{ margin: '0 0 0.35rem' }}><strong>Client:</strong> {pmReplyTarget.client?.name} &nbsp;|&nbsp; <strong>Location:</strong> {pmReplyTarget.location}</p>
+                  <p style={{ margin: '0 0 0.35rem' }}><strong>Client Expected Budget:</strong> {pmReplyTarget.expectedBudget ? formatMoney(pmReplyTarget.expectedBudget) : 'N/A'}</p>
+                  {pmReplyTarget.cmNotes && (
+                    <div style={{ marginTop: '0.4rem', padding: '0.5rem', background: '#eff6ff', borderRadius: '4px', color: '#1e3a8a', fontSize: '0.83rem' }}>
+                      <strong>CM Note:</strong> {pmReplyTarget.cmNotes}
+                    </div>
+                  )}
+                </div>
+
+                <div className="form-input-box">
+                  <label>Engineering Feasibility &amp; Technical Assessment *</label>
+                  <textarea
+                    rows={5}
+                    value={pmReplyForm.pmReply}
+                    onChange={(e) => setPmReplyForm({ ...pmReplyForm, pmReply: e.target.value })}
+                    placeholder="Describe structural assessment, site clearance recommendations, soil suitability, material availability, and technical comments..."
+                    required
+                  />
+                </div>
+
+                <div className="form-grid-2" style={{ marginTop: '1rem' }}>
+                  <div className="form-input-box">
+                    <label>PM Estimated Construction Cost (LKR)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="10000"
+                      placeholder="e.g. 26000000"
+                      value={pmReplyForm.pmEstimatedBudget}
+                      onChange={(e) => setPmReplyForm({ ...pmReplyForm, pmEstimatedBudget: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Estimated Construction Duration</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 8 - 10 Months"
+                      value={pmReplyForm.pmEstimatedDuration}
+                      onChange={(e) => setPmReplyForm({ ...pmReplyForm, pmEstimatedDuration: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.6rem', fontSize: '0.82rem' }}>
+                  This technical evaluation will be returned to the Client Manager so they can compile the official proposal for the client.
+                </small>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setPmReplyModalOpen(false); setPmReplyTarget(null); }}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={submittingPmReply}>
+                    {submittingPmReply ? 'Submitting Reply...' : 'Transmit Reply to Client Manager'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* PM PREVIEW PHOTOS MODAL */}
+        {pmPreviewPhotosModal && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '750px' }}>
+              <div className="modal-head-row">
+                <h3>Drawings &amp; Photos — {pmPreviewPhotosModal.title}</h3>
+                <button type="button" onClick={() => setPmPreviewPhotosModal(null)}>✕</button>
+              </div>
+              <div className="modal-body-content" style={{ marginTop: '1rem' }}>
+                <p style={{ color: '#64748b', marginBottom: '1rem' }}>
+                  Client: <b>{pmPreviewPhotosModal.client?.name}</b> | Location: <b>{pmPreviewPhotosModal.location}</b>
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
+                  {(pmPreviewPhotosModal.imageUrls || []).map((img, idx) => (
+                    <a key={idx} href={img} target="_blank" rel="noopener noreferrer">
+                      <img src={img} alt={`Drawing ${idx + 1}`} style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                    </a>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                <button type="button" className="btn-solid-green" onClick={() => setPmPreviewPhotosModal(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* START PROJECT MODAL (ASSIGN CLIENT & INITIALIZE PROJECT) */}
+        {startProjectModalOpen && startProjectTarget && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '650px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>CONSTRUCTION PROJECT INITIALIZATION</span>
+                  <h3 style={{ margin: '0.2rem 0 0', color: '#166534' }}>🚀 Start Project: {startProjectTarget.title}</h3>
+                </div>
+                <button type="button" onClick={() => { setStartProjectModalOpen(false); setStartProjectTarget(null); }}>✕</button>
+              </div>
+
+              <form onSubmit={handleConfirmStartProject} style={{ marginTop: '1.25rem' }}>
+                <div style={{ background: '#f0fdf4', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #bbf7d0', fontSize: '0.88rem' }}>
+                  <p style={{ margin: '0 0 0.35rem' }}>
+                    <strong>Assigned Client:</strong> {startProjectTarget.client?.name} ({startProjectTarget.client?.email || 'N/A'}, {startProjectTarget.client?.phone || 'N/A'})
+                  </p>
+                  <p style={{ margin: 0, color: '#166534' }}>
+                    🔒 Starting this project will assign client <strong>{startProjectTarget.client?.name}</strong> to the construction pipeline. The client will be able to track live progress and milestones from their portal.
+                  </p>
+                </div>
+
+                <div className="form-grid-2">
+                  <div className="form-input-box">
+                    <label>Project Name *</label>
+                    <input
+                      type="text"
+                      value={startProjectForm.name}
+                      onChange={(e) => setStartProjectForm({ ...startProjectForm, name: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Property Category *</label>
+                    <select
+                      value={startProjectForm.category}
+                      onChange={(e) => setStartProjectForm({ ...startProjectForm, category: e.target.value })}
+                      required
+                    >
+                      <option value="RESIDENCIES">Residencies</option>
+                      <option value="LANDS">Lands &amp; Plots</option>
+                      <option value="APARTMENTS">Apartments</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-grid-2" style={{ marginTop: '0.75rem' }}>
+                  <div className="form-input-box">
+                    <label>Site Location</label>
+                    <input
+                      type="text"
+                      value={startProjectForm.location}
+                      onChange={(e) => setStartProjectForm({ ...startProjectForm, location: e.target.value })}
+                      placeholder="e.g. Negombo, Colombo 07"
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Agreed Project Budget (LKR) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={startProjectForm.budget}
+                      onChange={(e) => setStartProjectForm({ ...startProjectForm, budget: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="form-grid-2" style={{ marginTop: '0.75rem' }}>
+                  <div className="form-input-box">
+                    <label>Project Start Date *</label>
+                    <input
+                      type="date"
+                      value={startProjectForm.startDate}
+                      onChange={(e) => setStartProjectForm({ ...startProjectForm, startDate: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Estimated Completion Date</label>
+                    <input
+                      type="date"
+                      value={startProjectForm.endDate}
+                      onChange={(e) => setStartProjectForm({ ...startProjectForm, endDate: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '0.75rem' }}>
+                  <label>Project Description &amp; Scope of Work</label>
+                  <textarea
+                    rows={3}
+                    value={startProjectForm.description}
+                    onChange={(e) => setStartProjectForm({ ...startProjectForm, description: e.target.value })}
+                    placeholder="Enter project scope and specifications..."
+                  />
+                </div>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setStartProjectModalOpen(false); setStartProjectTarget(null); }}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={startingProject} style={{ background: '#16a34a' }}>
+                    {startingProject ? 'Starting Project...' : '🚀 Initialize Project & Assign Client'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
