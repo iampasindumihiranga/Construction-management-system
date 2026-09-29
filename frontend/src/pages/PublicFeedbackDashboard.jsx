@@ -203,7 +203,7 @@ export default function PublicFeedbackDashboard() {
     <div className="light-site-wrapper">
       <Navbar />
 
-      <main className="client-portal-main" style={{ maxWidth: '1280px', margin: '0 auto', padding: '2rem 1.5rem 4rem' }}>
+      <main className="client-portal-main" style={{ width: '100%', maxWidth: '100%', padding: '1.5rem 1.5rem 4rem' }}>
         {/* Hero Section */}
         <section className="light-hero-card" style={{ marginBottom: '2rem' }}>
           <div className="hero-info-col">

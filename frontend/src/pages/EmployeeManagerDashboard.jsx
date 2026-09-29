@@ -570,7 +570,7 @@ export default function EmployeeManagerDashboard() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <button
                     onClick={startNewEmployee}
-                    style={{ padding: '12px 16px', background: '#047857', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
+                    style={{ padding: '12px 16px', background: '#f3f4f6', color: '#111827', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
                   >
                     Register New Employee
                   </button>

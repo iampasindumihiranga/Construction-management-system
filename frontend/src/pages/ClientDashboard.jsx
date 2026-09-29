@@ -18,11 +18,13 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
   updateClientProfile,
+  getClientById,
   getFeedback,
   submitFeedback,
   getDownPayments,
   createDownPayment,
   getPaymentSummary,
+  getBankDetails,
   formatDate,
   formatMoney,
 } from '../services/api';
@@ -88,6 +90,10 @@ export default function ClientDashboard() {
   });
   const [receiptFile, setReceiptFile] = useState(null);
   const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [bankDetails, setBankDetails] = useState(null);
+  const [cardGatewayStep, setCardGatewayStep] = useState('form'); // 'form' | 'gateway' | 'success'
+  const [cardForm, setCardForm] = useState({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+  const [processingCard, setProcessingCard] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -159,19 +165,31 @@ export default function ClientDashboard() {
   async function loadDashboardData() {
     setLoading(true);
     try {
-      const [allClients, showcaseProjects] = await Promise.all([
+      const [allClients, showcaseProjects, bankDet] = await Promise.all([
         getClients(),
         getProjects({ marketingOnly: true }),
+        getBankDetails().catch(() => null),
       ]);
+      setBankDetails(bankDet);
 
       setAllShowcaseProjects(showcaseProjects || []);
 
       let currentClient = null;
       if (user?.clientId) {
         currentClient = allClients.find((c) => c.id === user.clientId);
+        if (!currentClient) {
+          try {
+            currentClient = await getClientById(user.clientId);
+          } catch (e) {
+            console.warn('Failed to fetch client by id:', e);
+          }
+        }
       }
       if (!currentClient && user?.username) {
-        currentClient = allClients.find((c) => c.email?.toLowerCase() === user.username.toLowerCase());
+        currentClient = allClients.find((c) => c.email?.toLowerCase() === user.username.toLowerCase() || c.employeeNumber?.toLowerCase() === user.username.toLowerCase());
+      }
+      if (!currentClient && user?.email) {
+        currentClient = allClients.find((c) => c.email?.toLowerCase() === user.email.toLowerCase());
       }
       setClientProfile(currentClient);
 
@@ -235,6 +253,18 @@ export default function ClientDashboard() {
     loadDashboardData();
   }, [user]);
 
+  useEffect(() => {
+    if (clientProfile) {
+      setEditProfileForm({
+        name: clientProfile.name || '',
+        phone: clientProfile.phone || '',
+        address: clientProfile.address || '',
+        emergencyContact: clientProfile.emergencyContact || '',
+        preferredCategory: clientProfile.preferredCategory || 'RESIDENCIES',
+      });
+    }
+  }, [clientProfile]);
+
   const handleOpenPayModal = (presetProjectId = '') => {
     setReceiptFile(null);
     const chosenProject = projects.find(p => p.id === Number(presetProjectId)) || projects[0];
@@ -286,7 +316,7 @@ export default function ClientDashboard() {
         receiptFileType,
       });
 
-      setSuccessMsg('Your down payment has been recorded with 60-day validity! Thank you.');
+      setSuccessMsg('Your payment has been recorded! Thank you.');
       setPayModalOpen(false);
       setReceiptFile(null);
       const [dpData, summaryData] = await Promise.all([
@@ -297,7 +327,7 @@ export default function ClientDashboard() {
       setPaymentSummary(summaryData);
       setTimeout(() => setSuccessMsg(''), 4500);
     } catch (err) {
-      setError(err.message || 'Failed to submit down payment');
+      setError(err.message || 'Failed to submit payment');
     } finally {
       setSubmittingPayment(false);
     }
@@ -563,6 +593,61 @@ export default function ClientDashboard() {
     }
   };
 
+  const getProjectBalance = (projectId) => {
+    if (!projectId) return null;
+    const proj = projects.find(p => p.id === Number(projectId));
+    if (!proj || !proj.budget) return null;
+    const totalPaid = downPayments
+      .filter(dp => dp.project?.id === Number(projectId) && (dp.status === 'Valid' || dp.status === 'Expiring Soon'))
+      .reduce((sum, dp) => sum + (Number(dp.amount) || 0), 0);
+    return { total: Number(proj.budget), paid: totalPaid, balance: Math.max(0, Number(proj.budget) - totalPaid) };
+  };
+
+  const handleCardPayment = async (e) => {
+    e.preventDefault();
+    if (!cardForm.cardNumber || !cardForm.cardHolder || !cardForm.expiry || !cardForm.cvv) return;
+    setProcessingCard(true);
+    // Simulate card processing
+    await new Promise(r => setTimeout(r, 2500));
+    setProcessingCard(false);
+    setCardGatewayStep('success');
+    // After 2s auto-submit the actual payment
+    setTimeout(async () => {
+      setCardGatewayStep('form');
+      setCardForm({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+      if (!clientProfile || !payForm.amount || Number(payForm.amount) <= 0) return;
+      setSubmittingPayment(true);
+      try {
+        const chosenProj = projects.find(p => p.id === Number(payForm.projectId));
+        await createDownPayment({
+          client: { id: clientProfile.id },
+          project: payForm.projectId ? { id: Number(payForm.projectId) } : null,
+          amount: Number(payForm.amount),
+          paymentDate: payForm.paymentDate,
+          paymentMethod: 'Credit Card',
+          referenceNumber: `CC-${Date.now()}`,
+          notes: payForm.notes.trim() || 'Card payment via payment gateway',
+          totalProjectAmount: chosenProj?.budget ? Number(chosenProj.budget) : null,
+          requiredDownPayment: chosenProj?.budget ? Number((chosenProj.budget * 0.2).toFixed(2)) : null,
+          receipt: null, receiptFileName: null, receiptFileType: null,
+        });
+        setSuccessMsg('Card payment processed successfully! Your payment has been recorded.');
+        setPayModalOpen(false);
+        const [dpData, summaryData] = await Promise.all([
+          getDownPayments({ clientId: clientProfile.id }),
+          getPaymentSummary(clientProfile.id),
+        ]);
+        setDownPayments(dpData || []);
+        setPaymentSummary(summaryData);
+        setTimeout(() => setSuccessMsg(''), 4500);
+      } catch (err) {
+        setError(err.message || 'Payment failed');
+      } finally {
+        setSubmittingPayment(false);
+      }
+    }, 2000);
+  };
+
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
@@ -664,7 +749,7 @@ export default function ClientDashboard() {
             className={`tab-btn-item ${activeTab === 'downpayments' ? 'active' : ''}`}
             onClick={() => setActiveTab('downpayments')}
           >
-            <span>Down Payments ({downPayments.length})</span>
+            <span>Payments ({downPayments.length})</span>
           </button>
 
           <button
@@ -1845,83 +1930,166 @@ export default function ClientDashboard() {
 
         {/* TAB 8: PROFILE */}
         {activeTab === 'profile' && (
-          <div className="light-panel-card">
-            <div className="panel-card-head">
-              <div>
-                <span className="brand-green-subtitle">ACCOUNT INFORMATION</span>
-                <h3 className="panel-title">My Client Profile</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Profile Overview Card */}
+            <div className="light-panel-card">
+              <div className="panel-card-head">
+                <div>
+                  <span className="brand-green-subtitle">PROFILE OVERVIEW</span>
+                  <h3 className="panel-title">Client Account Details</h3>
+                  <p className="panel-meta">Your registered client information with Odiliya Holdings.</p>
+                </div>
+                <div>
+                  <span className="pill-badge active" style={{ fontSize: '0.85rem', padding: '0.35rem 0.85rem' }}>
+                    Active Client
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Full Name</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>
+                    {clientProfile?.name || editProfileForm.name || '—'}
+                  </p>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Email Address</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '0.95rem' }}>
+                    {clientProfile?.email || user?.username || '—'}
+                  </p>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Phone Number</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>
+                    {clientProfile?.phone || editProfileForm.phone || '—'}
+                  </p>
+                </div>
+
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Client OD ID</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#1e40af', fontSize: '1.05rem', fontFamily: 'monospace' }}>
+                    {clientProfile?.employeeNumber || 'OD-000101'}
+                  </p>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Emergency Contact</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 600, color: '#334155' }}>
+                    {clientProfile?.emergencyContact || editProfileForm.emergencyContact || '—'}
+                  </p>
+                </div>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Preferred Category</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 600, color: 'var(--brand-green)' }}>
+                    {clientProfile?.preferredCategory || editProfileForm.preferredCategory || 'RESIDENCIES'}
+                  </p>
+                </div>
+
+                <div style={{ background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: 8, padding: '1rem', gridColumn: '1 / -1' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Postal Address</small>
+                  <p style={{ margin: '0.25rem 0 0', color: '#374151', fontSize: '0.95rem' }}>
+                    {clientProfile?.address || editProfileForm.address || '—'}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <form onSubmit={handleUpdateProfile}>
-              <div className="form-grid-2">
-                <div className="form-input-box">
-                  <label>Full Legal Name *</label>
-                  <input
-                    type="text"
-                    value={editProfileForm.name}
-                    onChange={(e) => setEditProfileForm({ ...editProfileForm, name: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-input-box">
-                  <label>Email (Locked)</label>
-                  <input
-                    type="email"
-                    value={clientProfile?.email || user?.username}
-                    disabled
-                    style={{ opacity: 0.7, background: '#f1f5f9' }}
-                  />
-                </div>
-
-                <div className="form-input-box">
-                  <label>Direct Phone *</label>
-                  <input
-                    type="text"
-                    value={editProfileForm.phone}
-                    onChange={(e) => setEditProfileForm({ ...editProfileForm, phone: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="form-input-box">
-                  <label>Emergency Contact</label>
-                  <input
-                    type="text"
-                    value={editProfileForm.emergencyContact}
-                    onChange={(e) => setEditProfileForm({ ...editProfileForm, emergencyContact: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-input-box">
-                  <label>Client OD Number</label>
-                  <input
-                    type="text"
-                    value={clientProfile?.employeeNumber || 'OD-000101'}
-                    disabled
-                    style={{ opacity: 0.7, background: '#f1f5f9' }}
-                  />
+            {/* Edit Profile Form */}
+            <div className="light-panel-card">
+              <div className="panel-card-head">
+                <div>
+                  <span className="brand-green-subtitle">UPDATE INFORMATION</span>
+                  <h3 className="panel-title">Edit Profile Details</h3>
+                  <p className="panel-meta">You can modify your contact and profile details below.</p>
                 </div>
               </div>
 
-              <div className="form-input-box" style={{ marginTop: '1.25rem' }}>
-                <label>Postal Address</label>
-                <textarea
-                  rows={3}
-                  value={editProfileForm.address}
-                  onChange={(e) => setEditProfileForm({ ...editProfileForm, address: e.target.value })}
-                />
-              </div>
+              <form onSubmit={handleUpdateProfile}>
+                <div className="form-grid-2">
+                  <div className="form-input-box">
+                    <label>Full Legal Name *</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.name}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, name: e.target.value })}
+                      required
+                    />
+                  </div>
 
-              <button type="submit" className="btn-solid-green" style={{ marginTop: '1.5rem' }} disabled={savingProfile}>
-                {savingProfile ? 'Saving Details...' : 'Save Permitted Details'}
-              </button>
-            </form>
+                  <div className="form-input-box">
+                    <label>Email (Locked)</label>
+                    <input
+                      type="email"
+                      value={clientProfile?.email || user?.username || ''}
+                      disabled
+                      style={{ opacity: 0.7, background: '#f1f5f9' }}
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Direct Phone *</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.phone}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, phone: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Emergency Contact</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.emergencyContact}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, emergencyContact: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Preferred Category</label>
+                    <select
+                      value={editProfileForm.preferredCategory}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, preferredCategory: e.target.value })}
+                    >
+                      <option value="RESIDENCIES">Residencies</option>
+                      <option value="APARTMENTS">Apartments</option>
+                      <option value="LANDS">Lands</option>
+                    </select>
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Client OD Number</label>
+                    <input
+                      type="text"
+                      value={clientProfile?.employeeNumber || 'OD-000101'}
+                      disabled
+                      style={{ opacity: 0.7, background: '#f1f5f9' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1.25rem' }}>
+                  <label>Postal Address</label>
+                  <textarea
+                    rows={3}
+                    value={editProfileForm.address}
+                    onChange={(e) => setEditProfileForm({ ...editProfileForm, address: e.target.value })}
+                  />
+                </div>
+
+                <button type="submit" className="btn-solid-green" style={{ marginTop: '1.5rem' }} disabled={savingProfile}>
+                  {savingProfile ? 'Saving Details...' : 'Save Profile Changes'}
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
-        {/* TAB: DOWN PAYMENTS */}
+        {/* TAB: PAYMENTS */}
         {activeTab === 'downpayments' && (
           <div>
             {/* KPI summary */}
@@ -1935,16 +2103,9 @@ export default function ClientDashboard() {
               </div>
               <div className="light-kpi-card">
                 <div>
-                  <small>Valid Payments</small>
-                  <strong style={{ color: '#16a34a' }}>{downPayments.filter(p => p.status === 'Valid').length}</strong>
+                  <small>Confirmed Payments</small>
+                  <strong style={{ color: '#16a34a' }}>{downPayments.filter(p => p.status === 'Valid' || p.status === 'Verified' || p.status === 'Approved').length}</strong>
                   <span className="kpi-status-text">active</span>
-                </div>
-              </div>
-              <div className="light-kpi-card">
-                <div>
-                  <small>Expiring Soon</small>
-                  <strong style={{ color: '#d97706' }}>{downPayments.filter(p => p.status === 'Expiring Soon').length}</strong>
-                  <span className="kpi-status-text">within 15 days</span>
                 </div>
               </div>
               <div className="light-kpi-card">
@@ -1958,41 +2119,35 @@ export default function ClientDashboard() {
                   <span className="kpi-status-text">paid</span>
                 </div>
               </div>
-            </div>
-
-            {/* Expiry alerts */}
-            {downPayments.filter(p => p.status === 'Expiring Soon').length > 0 && (
-              <div style={{
-                background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 8,
-                padding: '0.75rem 1.25rem', marginBottom: '1.25rem', color: '#92400e', fontSize: '0.9rem'
-              }}>
-                ⚠️ You have {downPayments.filter(p => p.status === 'Expiring Soon').length} downpayment(s) expiring within 15 days. Contact your Client Manager to renew.
+              <div className="light-kpi-card">
+                <div>
+                  <small>Assigned Projects</small>
+                  <strong style={{ color: '#0369a1' }}>{projects.length}</strong>
+                  <span className="kpi-status-text">active</span>
+                </div>
               </div>
-            )}
+            </div>
 
             {/* Section header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>My Down Payments</h3>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>My Payments</h3>
               <button className="btn-solid-green" onClick={handleOpenPayModal}>
-                + Submit Down Payment
+                + Submit Payment
               </button>
             </div>
 
             {/* Payment list */}
             {downPayments.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b', background: '#f8fafc', borderRadius: 10 }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>💳</div>
-                <p style={{ margin: 0, fontWeight: 600 }}>No down payments recorded yet.</p>
-                <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>Click "Submit Down Payment" to record your first payment.</p>
+                <p style={{ margin: 0, fontWeight: 600 }}>No payments recorded yet.</p>
+                <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>Click "Submit Payment" to record your payment.</p>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {downPayments.map((pay) => {
-                  const badgeStyle = pay.status === 'Valid'
+                  const badgeStyle = (pay.status === 'Valid' || pay.status === 'Verified' || pay.status === 'Approved')
                     ? { background: '#dcfce7', color: '#16a34a', padding: '2px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 }
-                    : pay.status === 'Expiring Soon'
-                    ? { background: '#fef3c7', color: '#b45309', padding: '2px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 }
-                    : { background: '#fee2e2', color: '#dc2626', padding: '2px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 };
+                    : { background: '#fef3c7', color: '#b45309', padding: '2px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 };
 
                   return (
                     <div key={pay.id} style={{
@@ -2009,7 +2164,7 @@ export default function ClientDashboard() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <span style={badgeStyle}>{pay.status || 'Unknown'}</span>
+                          <span style={badgeStyle}>{pay.status === 'Valid' ? 'Confirmed' : (pay.status || 'Pending')}</span>
                           <span style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1e293b' }}>
                             Rs. {Number(pay.amount || 0).toLocaleString()}
                           </span>
@@ -2017,14 +2172,8 @@ export default function ClientDashboard() {
                       </div>
 
                       <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.75rem', fontSize: '0.83rem', color: '#475569' }}>
-                        <span>📅 Paid: <strong>{pay.paymentDate ? new Date(pay.paymentDate).toLocaleDateString() : '—'}</strong></span>
-                        <span>🗓 Valid Until: <strong>{pay.validUntil ? new Date(pay.validUntil).toLocaleDateString() : '—'}</strong></span>
-                        {pay.daysRemaining != null && (
-                          <span style={{ color: pay.daysRemaining <= 15 ? '#d97706' : '#16a34a' }}>
-                            ⏳ {pay.daysRemaining > 0 ? `${pay.daysRemaining} days remaining` : 'Expired'}
-                          </span>
-                        )}
-                        {pay.notes && <span>📝 {pay.notes}</span>}
+                        <span>Paid: <strong>{pay.paymentDate ? new Date(pay.paymentDate).toLocaleDateString() : '—'}</strong></span>
+                        {pay.notes && <span>Note: {pay.notes}</span>}
                       </div>
 
                       {(pay.receipt || pay.receiptFileName) && (
@@ -2034,7 +2183,7 @@ export default function ClientDashboard() {
                             style={{ fontSize: '0.8rem', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}
                             onClick={() => setReceiptViewModal({ open: true, receipt: pay.receipt, fileName: pay.receiptFileName, fileType: pay.receiptFileType })}
                           >
-                            📎 View Receipt
+                            View Receipt
                           </button>
                         </div>
                       )}
@@ -2046,132 +2195,320 @@ export default function ClientDashboard() {
           </div>
         )}
 
+
         {/* ===== PAY MODAL ===== */}
         {payModalOpen && (
-          <div className="modal-overlay" onClick={() => setPayModalOpen(false)}>
-            <div className="modal-box" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-overlay" onClick={() => { setPayModalOpen(false); setCardGatewayStep('form'); }} >
+            <div className="modal-box" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h3>Submit Down Payment</h3>
-                <button className="modal-close-btn" onClick={() => setPayModalOpen(false)}>✕</button>
+                <h3>Submit Payment</h3>
+                <button className="modal-close-btn" onClick={() => { setPayModalOpen(false); setCardGatewayStep('form'); }}>✕</button>
               </div>
-              <form onSubmit={handleClientSubmitPayment} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
 
-                {/* Project selector */}
-                <div className="form-input-box">
-                  <label>Project</label>
-                  <select
-                    value={payForm.projectId}
-                    onChange={(e) => setPayForm({ ...payForm, projectId: e.target.value })}
-                    required
-                  >
-                    <option value="">-- Select a Project --</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Base form - always shown first */}
+              {cardGatewayStep === 'form' && (
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  if (payForm.paymentMethod === 'Credit Card') {
+                    setCardGatewayStep('gateway');
+                  } else {
+                    handleClientSubmitPayment(e);
+                  }
+                }} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
 
-                {/* Amount */}
-                <div className="form-input-box">
-                  <label>Amount (Rs.)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="Enter payment amount"
-                    value={payForm.amount}
-                    onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
-                    required
-                  />
-                </div>
+                  {/* Project selector */}
+                  <div className="form-input-box">
+                    <label>Project</label>
+                    <select
+                      value={payForm.projectId}
+                      onChange={(e) => setPayForm({ ...payForm, projectId: e.target.value })}
+                      required
+                    >
+                      <option value="">-- Select a Project --</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
 
-                {/* Payment Date */}
-                <div className="form-input-box">
-                  <label>Payment Date</label>
-                  <input
-                    type="date"
-                    value={payForm.paymentDate}
-                    onChange={(e) => setPayForm({ ...payForm, paymentDate: e.target.value })}
-                    required
-                  />
-                  {payForm.paymentDate && (
-                    <small style={{ color: '#64748b', marginTop: 4, display: 'block' }}>
-                      ✅ Valid until: <strong>{calculateValidityDate(payForm.paymentDate)}</strong> (60 days)
-                    </small>
+                  {/* Balance Info */}
+                  {payForm.projectId && (() => {
+                    const bal = getProjectBalance(payForm.projectId);
+                    if (!bal) return null;
+                    return (
+                      <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div>
+                            <small style={{ color: '#6b7280' }}>Total Project Value</small>
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>Rs. {bal.total.toLocaleString()}</div>
+                          </div>
+                          <div>
+                            <small style={{ color: '#6b7280' }}>Total Paid So Far</small>
+                            <div style={{ fontWeight: 700, color: '#16a34a' }}>Rs. {bal.paid.toLocaleString()}</div>
+                          </div>
+                          <div>
+                            <small style={{ color: '#6b7280' }}>Balance Remaining</small>
+                            <div style={{ fontWeight: 700, color: bal.balance > 0 ? '#dc2626' : '#16a34a' }}>
+                              Rs. {bal.balance.toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+                        {bal.balance > 0 && (
+                          <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: '#fff7ed', borderRadius: 6, color: '#92400e', fontSize: '0.82rem' }}>
+                            Balance you should pay: <strong>Rs. {bal.balance.toLocaleString()}</strong>
+                          </div>
+                        )}
+                        {bal.balance === 0 && (
+                          <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: '#f0fdf4', borderRadius: 6, color: '#166534', fontSize: '0.82rem' }}>
+                            This project is fully paid!
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Amount */}
+                  <div className="form-input-box">
+                    <label>Amount to Pay (Rs.)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Enter payment amount"
+                      value={payForm.amount}
+                      onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  {/* Payment Date */}
+                  <div className="form-input-box">
+                    <label>Payment Date</label>
+                    <input
+                      type="date"
+                      value={payForm.paymentDate}
+                      onChange={(e) => setPayForm({ ...payForm, paymentDate: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  {/* Payment Method */}
+                  <div className="form-input-box">
+                    <label>Payment Method</label>
+                    <select
+                      value={payForm.paymentMethod}
+                      onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })}
+                      required
+                    >
+                      <option value="">-- Select Method --</option>
+                      <option value="Bank Transfer">Bank Transfer</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Credit Card">Credit / Debit Card</option>
+                    </select>
+                  </div>
+
+                  {/* CASH MESSAGE */}
+                  {payForm.paymentMethod === 'Cash' && (
+                    <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '0.85rem 1rem', color: '#78350f', fontSize: '0.9rem' }}>
+                      <strong>Cash Payment Instructions</strong>
+                      <p style={{ margin: '0.4rem 0 0', lineHeight: 1.6 }}>
+                        Please make the payment at the company office. Your payment will be verified by a staff member after the cash is received.
+                      </p>
+                    </div>
                   )}
-                </div>
 
-                {/* Payment Method */}
-                <div className="form-input-box">
-                  <label>Payment Method</label>
-                  <select
-                    value={payForm.paymentMethod}
-                    onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })}
-                    required
-                  >
-                    <option value="">-- Select Method --</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Cash">Cash</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="Online Payment">Online Payment</option>
-                    <option value="Credit Card">Credit Card</option>
-                  </select>
-                </div>
-
-                {/* Reference Number */}
-                <div className="form-input-box">
-                  <label>Reference Number</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. TXN-2025-001"
-                    value={payForm.referenceNumber}
-                    onChange={(e) => setPayForm({ ...payForm, referenceNumber: e.target.value })}
-                  />
-                </div>
-
-                {/* Receipt Upload */}
-                <div className="form-input-box">
-                  <label>Receipt (Image / PDF)</label>
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        setReceiptFile({ data: ev.target.result, name: file.name, type: file.type });
-                      };
-                      reader.readAsDataURL(file);
-                    }}
-                  />
-                  {receiptFile && (
-                    <small style={{ color: '#16a34a', marginTop: 4, display: 'block' }}>
-                      ✅ {receiptFile.name} selected
-                    </small>
+                  {/* BANK TRANSFER DETAILS */}
+                  {payForm.paymentMethod === 'Bank Transfer' && (
+                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '0.85rem 1rem', color: '#1e40af', fontSize: '0.88rem' }}>
+                      <strong>Bank Transfer Details</strong>
+                      {bankDetails ? (
+                        <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', color: '#1e3a8a' }}>
+                          <div><strong>Bank Name:</strong> {bankDetails.bankName || '—'}</div>
+                          <div><strong>Branch:</strong> {bankDetails.branch || '—'}</div>
+                          <div><strong>Account Name:</strong> {bankDetails.accountName || '—'}</div>
+                          <div><strong>Account Number:</strong> <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{bankDetails.accountNumber || '—'}</span></div>
+                          {bankDetails.swiftCode && <div><strong>SWIFT / Bank Code:</strong> {bankDetails.swiftCode}</div>}
+                          {bankDetails.additionalInfo && <div style={{ marginTop: '0.35rem', color: '#374151' }}>{bankDetails.additionalInfo}</div>}
+                        </div>
+                      ) : (
+                        <p style={{ margin: '0.4rem 0 0', color: '#374151' }}>Please contact the Client Manager for bank transfer details.</p>
+                      )}
+                      <p style={{ margin: '0.6rem 0 0', fontSize: '0.82rem', color: '#374151' }}>After transferring, please enter the reference/transaction number below and upload your receipt slip.</p>
+                    </div>
                   )}
-                </div>
 
-                {/* Notes */}
-                <div className="form-input-box">
-                  <label>Notes (optional)</label>
-                  <textarea
-                    rows={2}
-                    placeholder="Any additional information..."
-                    value={payForm.notes}
-                    onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
-                  />
-                </div>
+                  {/* Reference Number - shown for bank transfer */}
+                  {payForm.paymentMethod === 'Bank Transfer' && (
+                    <div className="form-input-box">
+                      <label>Reference / Transaction Number</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. TXN-2025-001"
+                        value={payForm.referenceNumber}
+                        onChange={(e) => setPayForm({ ...payForm, referenceNumber: e.target.value })}
+                      />
+                    </div>
+                  )}
 
-                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '0.5rem' }}>
-                  <button type="button" className="btn-outline" onClick={() => setPayModalOpen(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn-solid-green" disabled={submittingPayment}>
-                    {submittingPayment ? 'Submitting...' : 'Submit Payment'}
-                  </button>
+                  {/* Receipt Upload - shown for bank transfer */}
+                  {payForm.paymentMethod === 'Bank Transfer' && (
+                    <div className="form-input-box">
+                      <label>Upload Payment Receipt / Slip (Image or PDF)</label>
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            setReceiptFile({ data: ev.target.result, name: file.name, type: file.type });
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                      {receiptFile && (
+                        <small style={{ color: '#16a34a', marginTop: 4, display: 'block' }}>
+                          {receiptFile.name} selected
+                        </small>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Notes */}
+                  <div className="form-input-box">
+                    <label>Notes (optional)</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Any additional information..."
+                      value={payForm.notes}
+                      onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '0.5rem' }}>
+                    <button type="button" className="btn-outline" onClick={() => { setPayModalOpen(false); setCardGatewayStep('form'); }}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn-solid-green" disabled={submittingPayment}>
+                      {submittingPayment ? 'Submitting...' : (
+                        payForm.paymentMethod === 'Credit Card'
+                          ? 'Proceed to Card Payment →'
+                          : 'Submit Payment'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* CARD PAYMENT GATEWAY */}
+              {cardGatewayStep === 'gateway' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ background: '#f8fafc', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '0.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#475569' }}>
+                      <span>Amount to Pay:</span>
+                      <strong style={{ color: '#0f172a', fontSize: '1rem' }}>Rs. {Number(payForm.amount || 0).toLocaleString()}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#64748b', marginTop: '0.25rem' }}>
+                      <span>Method:</span>
+                      <span>Credit / Debit Card</span>
+                    </div>
+                  </div>
+
+                  {/* Fake card UI */}
+                  <div style={{ background: 'linear-gradient(135deg, #065f46, #047857)', borderRadius: 12, padding: '1.25rem 1.5rem', color: '#fff', marginBottom: '0.25rem', position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
+                    <div style={{ position: 'absolute', bottom: '-30px', right: '30px', width: 130, height: 130, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
+                    <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.75rem', letterSpacing: 2 }}>ODILIYA SECURE PAYMENT</div>
+                    <div style={{ fontSize: '1.3rem', letterSpacing: 3, fontFamily: 'monospace', marginBottom: '0.75rem' }}>
+                      {cardForm.cardNumber ? cardForm.cardNumber.replace(/(.{4})/g, '$1 ').trim() : '•••• •••• •••• ••••'}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                      <div>
+                        <div style={{ opacity: 0.7, fontSize: '0.65rem', letterSpacing: 1 }}>CARD HOLDER</div>
+                        <div style={{ fontWeight: 600 }}>{cardForm.cardHolder || 'YOUR NAME'}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ opacity: 0.7, fontSize: '0.65rem', letterSpacing: 1 }}>EXPIRES</div>
+                        <div style={{ fontWeight: 600 }}>{cardForm.expiry || 'MM/YY'}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleCardPayment} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div className="form-input-box">
+                      <label>Card Number *</label>
+                      <input
+                        type="text"
+                        maxLength={16}
+                        placeholder="1234 5678 9012 3456"
+                        value={cardForm.cardNumber}
+                        onChange={(e) => setCardForm({ ...cardForm, cardNumber: e.target.value.replace(/\D/g, '') })}
+                        required
+                        style={{ fontFamily: 'monospace', letterSpacing: 2 }}
+                      />
+                    </div>
+                    <div className="form-input-box">
+                      <label>Card Holder Name *</label>
+                      <input
+                        type="text"
+                        placeholder="As printed on card"
+                        value={cardForm.cardHolder}
+                        onChange={(e) => setCardForm({ ...cardForm, cardHolder: e.target.value.toUpperCase() })}
+                        required
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      <div className="form-input-box">
+                        <label>Expiry (MM/YY) *</label>
+                        <input
+                          type="text"
+                          placeholder="MM/YY"
+                          maxLength={5}
+                          value={cardForm.expiry}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/\D/g, '');
+                            if (v.length > 2) v = v.slice(0,2) + '/' + v.slice(2);
+                            setCardForm({ ...cardForm, expiry: v });
+                          }}
+                          required
+                        />
+                      </div>
+                      <div className="form-input-box">
+                        <label>CVV *</label>
+                        <input
+                          type="password"
+                          placeholder="•••"
+                          maxLength={4}
+                          value={cardForm.cvv}
+                          onChange={(e) => setCardForm({ ...cardForm, cvv: e.target.value.replace(/\D/g, '') })}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '0.25rem' }}>
+                      <button type="button" className="btn-outline" onClick={() => setCardGatewayStep('form')} disabled={processingCard}>
+                        ← Back
+                      </button>
+                      <button type="submit" className="btn-solid-green" disabled={processingCard} style={{ minWidth: 140 }}>
+                        {processingCard ? 'Processing...' : 'Pay Now'}
+                      </button>
+                    </div>
+                  </form>
+                  <div style={{ textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                    256-bit SSL Encrypted • PCI DSS Compliant
+                  </div>
                 </div>
-              </form>
+              )}
+
+              {/* PAYMENT SUCCESS */}
+              {cardGatewayStep === 'success' && (
+                <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                  <h3 style={{ color: '#16a34a', margin: '0 0 0.5rem' }}>Payment Approved!</h3>
+                  <p style={{ color: '#475569', margin: 0 }}>Rs. {Number(payForm.amount || 0).toLocaleString()} has been processed successfully.</p>
+                  <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.5rem' }}>Recording your payment...</p>
+                </div>
+              )}
             </div>
           </div>
         )}

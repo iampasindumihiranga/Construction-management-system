@@ -374,3 +374,8 @@ export const getPaymentSummary = (clientId, projectId) => {
   const qs = query.toString();
   return request(`/api/down-payments/summary${qs ? `?${qs}` : ''}`);
 };
+
+// Bank Details (editable by Client Manager, read by Client)
+export const getBankDetails = () => request('/api/bank-details');
+export const updateBankDetails = (details) => request('/api/bank-details', { method: 'PUT', body: details });
+

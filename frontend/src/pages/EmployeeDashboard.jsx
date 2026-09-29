@@ -147,7 +147,7 @@ export default function EmployeeDashboard() {
     <div className="light-site-wrapper">
       <Navbar />
 
-      <main className="pm-page" style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px 16px' }}>
+      <main className="pm-page">
         {/* Welcome Header Banner */}
         <section
           style={{

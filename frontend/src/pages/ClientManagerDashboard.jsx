@@ -33,9 +33,12 @@ import {
   updateDownPayment,
   updateDownPaymentStatus,
   deleteDownPayment,
+  getBankDetails,
+  updateBankDetails,
   formatDate,
   formatMoney,
 } from '../services/api';
+
 
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -207,6 +210,21 @@ export default function ClientManagerDashboard() {
     receiptFileType: '',
   });
 
+  // Bank Details state (editable by CM)
+  const [bankDetails, setBankDetails] = useState(null);
+  const [bankDetailsModalOpen, setBankDetailsModalOpen] = useState(false);
+  const [bankDetailsForm, setBankDetailsForm] = useState({
+    bankName: '',
+    branch: '',
+    accountName: '',
+    accountNumber: '',
+    swiftCode: '',
+    additionalInfo: '',
+  });
+  const [savingBankDetails, setSavingBankDetails] = useState(false);
+
+
+
   async function loadAllData() {
     setLoading(true);
     try {
@@ -221,6 +239,7 @@ export default function ClientManagerDashboard() {
         feedbacksData,
         paymentsData,
         requestsData,
+        bankDet,
       ] = await Promise.all([
         getDashboardSummary(),
         getClients(clientSearch),
@@ -236,6 +255,7 @@ export default function ClientManagerDashboard() {
           clientId: paymentClientFilter || undefined,
         }),
         getProjectRequests(),
+        getBankDetails().catch(() => null),
       ]);
 
       setSummary(dashSummary);
@@ -248,6 +268,17 @@ export default function ClientManagerDashboard() {
       setFeedbacks(feedbacksData);
       setDownPayments(paymentsData);
       setProjectRequests(requestsData || []);
+      if (bankDet) {
+        setBankDetails(bankDet);
+        setBankDetailsForm({
+          bankName: bankDet.bankName || '',
+          branch: bankDet.branch || '',
+          accountName: bankDet.accountName || '',
+          accountNumber: bankDet.accountNumber || '',
+          swiftCode: bankDet.swiftCode || '',
+          additionalInfo: bankDet.additionalInfo || '',
+        });
+      }
       setError('');
     } catch (err) {
       setError(err.message || 'Failed to load manager dashboard data');
@@ -255,6 +286,24 @@ export default function ClientManagerDashboard() {
       setLoading(false);
     }
   }
+
+  const handleSaveBankDetails = async (e) => {
+    e.preventDefault();
+    setSavingBankDetails(true);
+    try {
+      const saved = await updateBankDetails(bankDetailsForm);
+      setBankDetails(saved);
+      setBankDetailsModalOpen(false);
+      setSuccessMsg('Bank details updated successfully! Clients will now see the updated details when selecting Bank Transfer.');
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err) {
+      setError(err.message || 'Failed to save bank details');
+    } finally {
+      setSavingBankDetails(false);
+    }
+  };
+
+
 
   useEffect(() => {
     loadAllData();
@@ -888,7 +937,15 @@ export default function ClientManagerDashboard() {
             className={activeTab === 'payments' ? 'active' : ''}
             onClick={() => setActiveTab('payments')}
           >
-            Down Payments ({downPayments.length})
+            Payments ({downPayments.length})
+          </button>
+
+          <button
+            type="button"
+            className={activeTab === 'bank-details' ? 'active' : ''}
+            onClick={() => setActiveTab('bank-details')}
+          >
+            Bank Details
           </button>
         </nav>
 
@@ -1289,7 +1346,7 @@ export default function ClientManagerDashboard() {
                     <th>Price (Client-Visible)</th>
                     <th>Assigned Client</th>
                     <th>Progress</th>
-                    <th>Downpayment</th>
+                    <th>Payment Status</th>
                     <th>Construction Status</th>
                     <th>Milestones</th>
                     <th>Actions</th>
@@ -1328,20 +1385,17 @@ export default function ClientManagerDashboard() {
                       <td>
                         {pPayment ? (
                           <div>
-                            <span className={
-                              pPayment.status === 'Valid' ? 'dp-badge-valid' :
-                              pPayment.status === 'Expiring Soon' ? 'dp-badge-expiring' : 'dp-badge-expired'
-                            }>
-                              {pPayment.status}
+                            <span className="pill-badge active" style={{ fontSize: '0.75rem' }}>
+                              Paid: {formatMoney(pPayment.amount)}
                             </span>
                             <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                              {formatMoney(pPayment.amount)} (Valid: {formatDate(pPayment.validUntil)})
+                              {formatDate(pPayment.paymentDate)}
                             </small>
                           </div>
                         ) : (
                           <div>
-                            <span style={{ color: '#ea580c', fontSize: '0.78rem', fontWeight: 700, background: '#fff7ed', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #fed7aa' }}>
-                              Required
+                            <span style={{ color: '#64748b', fontSize: '0.78rem', background: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                              No Payments
                             </span>
                           </div>
                         )}
@@ -1360,7 +1414,7 @@ export default function ClientManagerDashboard() {
                                 setPaymentSearch(pPayment.referenceNumber || p.name);
                               }}
                             >
-                              View DP
+                              View Payments
                             </button>
                           ) : (
                             <button
@@ -1369,7 +1423,7 @@ export default function ClientManagerDashboard() {
                               style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem', background: '#09543b' }}
                               onClick={() => openAddPayment(p)}
                             >
-                              + Downpayment
+                              + Payment
                             </button>
                           )}
                           <button
@@ -1614,65 +1668,51 @@ export default function ClientManagerDashboard() {
           </div>
         )}
 
-        {/* TAB 9: DOWN PAYMENTS */}
+        {/* TAB 9: PAYMENTS */}
         {activeTab === 'payments' && (
           <div>
             {/* KPI Summary Cards */}
             <section className="pm-metrics" style={{ marginBottom: '1.5rem' }}>
               <div className="pm-metric">
-                <span>Total Downpayments Collected</span>
+                <span>Total Payments Collected</span>
                 <strong style={{ color: 'var(--brand-green)' }}>
-                  {formatMoney(downPayments.filter(p => p.status !== 'Expired').reduce((acc, p) => acc + (Number(p.amount) || 0), 0))}
+                  {formatMoney(downPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0))}
                 </strong>
               </div>
               <div className="pm-metric">
-                <span>Valid Downpayments</span>
+                <span>Confirmed Payments</span>
                 <strong style={{ color: '#15803d' }}>
-                  {downPayments.filter(p => p.status === 'Valid').length}
+                  {downPayments.filter(p => p.status === 'Valid' || p.status === 'Verified' || p.status === 'Approved').length}
                 </strong>
               </div>
               <div className="pm-metric">
-                <span>Expiring Soon (60-Day Limit)</span>
+                <span>Total Transactions</span>
+                <strong style={{ color: '#0369a1' }}>
+                  {downPayments.length}
+                </strong>
+              </div>
+              <div className="pm-metric">
+                <span>Pending Verification</span>
                 <strong style={{ color: '#b45309' }}>
-                  {downPayments.filter(p => p.status === 'Expiring Soon').length}
-                </strong>
-              </div>
-              <div className="pm-metric">
-                <span>Expired Downpayments</span>
-                <strong style={{ color: '#b91c1c' }}>
-                  {downPayments.filter(p => p.status === 'Expired').length}
+                  {downPayments.filter(p => p.status === 'Pending').length}
                 </strong>
               </div>
             </section>
-
-            {/* Expiry alerts */}
-            {downPayments.filter(p => p.status === 'Expiring Soon').length > 0 && (
-              <div className="pm-alert error" style={{ margin: '0 0 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-                <div>
-                  <strong style={{ display: 'block' }}>
-                    Alert: {downPayments.filter(p => p.status === 'Expiring Soon').length} Downpayment(s) are Expiring Soon!
-                  </strong>
-                  <p style={{ fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
-                    Validity is within 15 days of the 60-day limit. Follow up with clients to proceed with construction stages.
-                  </p>
-                </div>
-              </div>
-            )}
 
             {/* Main Table Panel */}
             <div className="light-panel-card">
               <div className="panel-card-head">
                 <div>
-                  <span className="brand-green-subtitle">DOWNPAYMENT MANAGEMENT</span>
-                  <h3 className="panel-title">Project Downpayment Records</h3>
-                  <p className="panel-meta">All downpayments are automatically valid for 60 days from payment date.</p>
+                  <span className="brand-green-subtitle">PAYMENT MANAGEMENT</span>
+                  <h3 className="panel-title">Project Payment Records</h3>
+                  <p className="panel-meta">Track all client payment transactions across construction projects.</p>
                 </div>
                 <button
                   type="button"
                   className="btn-solid-green"
                   onClick={() => openAddPayment()}
                 >
-                  + Record Down Payment
+                  + Record Payment
                 </button>
               </div>
 
@@ -1695,9 +1735,10 @@ export default function ClientManagerDashboard() {
                     style={{ width: '100%', padding: '0.55rem 0.85rem', fontSize: '0.9rem' }}
                   >
                     <option value="">All Statuses</option>
-                    <option value="Valid">Valid</option>
-                    <option value="Expiring Soon">Expiring Soon</option>
-                    <option value="Expired">Expired</option>
+                    <option value="Valid">Confirmed</option>
+                    <option value="Verified">Verified</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Pending">Pending</option>
                   </select>
                 </div>
 
@@ -1741,7 +1782,6 @@ export default function ClientManagerDashboard() {
                         <th>Project</th>
                         <th>Amount</th>
                         <th>Payment Date</th>
-                        <th>Valid Until (60 Days)</th>
                         <th>Method</th>
                         <th>Receipt</th>
                         <th>Status</th>
@@ -1750,12 +1790,10 @@ export default function ClientManagerDashboard() {
                     </thead>
                     <tbody>
                       {downPayments.map((p) => {
-                        const isExpiring = p.status === 'Expiring Soon';
-                        const isExpired = p.status === 'Expired';
                         return (
-                          <tr key={p.id} style={{ background: isExpired ? 'rgba(239, 68, 68, 0.04)' : (isExpiring ? 'rgba(245, 158, 11, 0.05)' : undefined) }}>
+                          <tr key={p.id}>
                             <td>
-                              <strong>{p.referenceNumber || `DP-${p.id}`}</strong>
+                              <strong>{p.referenceNumber || `PAY-${p.id}`}</strong>
                               <small style={{ display: 'block', color: 'var(--text-muted)' }}>ID #{p.id}</small>
                             </td>
                             <td>
@@ -1778,14 +1816,6 @@ export default function ClientManagerDashboard() {
                               </strong>
                             </td>
                             <td>{formatDate(p.paymentDate)}</td>
-                            <td>
-                              <strong>{formatDate(p.validUntil)}</strong>
-                              {p.daysRemaining !== null && p.daysRemaining !== undefined && (
-                                <small style={{ display: 'block', color: isExpired ? '#b91c1c' : (isExpiring ? '#b45309' : '#15803d'), fontWeight: 600 }}>
-                                  {p.daysRemaining < 0 ? `${Math.abs(p.daysRemaining)} days ago` : `${p.daysRemaining} days left`}
-                                </small>
-                              )}
-                            </td>
                             <td>
                               <span className="pill-badge active" style={{ fontSize: '0.72rem' }}>
                                 {p.paymentMethod?.replace('_', ' ')}
@@ -1818,20 +1848,17 @@ export default function ClientManagerDashboard() {
                                   cursor: 'pointer',
                                   background:
                                     p.status === 'Verified' || p.status === 'Approved' || p.status === 'Valid' ? '#dcfce7' :
-                                    p.status === 'Expiring Soon' || p.status === 'Pending' ? '#fef3c7' : '#fee2e2',
+                                    p.status === 'Pending' ? '#fef3c7' : '#fee2e2',
                                   color:
                                     p.status === 'Verified' || p.status === 'Approved' || p.status === 'Valid' ? '#15803d' :
-                                    p.status === 'Expiring Soon' || p.status === 'Pending' ? '#b45309' : '#b91c1c',
+                                    p.status === 'Pending' ? '#b45309' : '#b91c1c',
                                 }}
-                                title="Change down payment status"
+                                title="Change payment status"
                               >
-                                <option value="Valid">Valid</option>
+                                <option value="Valid">Confirmed</option>
                                 <option value="Verified">Verified</option>
                                 <option value="Approved">Approved</option>
                                 <option value="Pending">Pending</option>
-                                <option value="Expiring Soon">Expiring Soon</option>
-                                <option value="Expired">Expired</option>
-                                <option value="Refunded">Refunded</option>
                               </select>
                             </td>
                             <td>
@@ -2168,6 +2195,77 @@ export default function ClientManagerDashboard() {
                 </div>
               );
             })()}
+          </div>
+        )}
+
+        {/* TAB: BANK DETAILS (editable by Client Manager) */}
+        {activeTab === 'bank-details' && (
+          <div className="light-panel-card">
+            <div className="panel-card-head">
+              <div>
+                <span className="brand-green-subtitle">PAYMENT SETTINGS</span>
+                <h3 className="panel-title">Company Bank Account Details</h3>
+                <p className="panel-meta">These details are shown to clients when they select Bank Transfer as the payment method. Keep them up to date.</p>
+              </div>
+              <button
+                type="button"
+                className="btn-solid-green"
+                onClick={() => {
+                  setBankDetailsForm({
+                    bankName: bankDetails?.bankName || '',
+                    branch: bankDetails?.branch || '',
+                    accountName: bankDetails?.accountName || '',
+                    accountNumber: bankDetails?.accountNumber || '',
+                    swiftCode: bankDetails?.swiftCode || '',
+                    additionalInfo: bankDetails?.additionalInfo || '',
+                  });
+                  setBankDetailsModalOpen(true);
+                }}
+              >
+                Edit Bank Details
+              </button>
+            </div>
+
+            {bankDetails ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Bank Name</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>{bankDetails.bankName || '—'}</p>
+                </div>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Branch</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>{bankDetails.branch || '—'}</p>
+                </div>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Account Name</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>{bankDetails.accountName || '—'}</p>
+                </div>
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '1rem' }}>
+                  <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Account Number</small>
+                  <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#1e40af', fontSize: '1.1rem', fontFamily: 'monospace', letterSpacing: 2 }}>{bankDetails.accountNumber || '—'}</p>
+                </div>
+                {bankDetails.swiftCode && (
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '1rem' }}>
+                    <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>SWIFT / Bank Code</small>
+                    <p style={{ margin: '0.25rem 0 0', fontWeight: 700, color: '#0f172a', fontSize: '1rem', fontFamily: 'monospace' }}>{bankDetails.swiftCode}</p>
+                  </div>
+                )}
+                {bankDetails.additionalInfo && (
+                  <div style={{ background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: 8, padding: '1rem', gridColumn: '1 / -1' }}>
+                    <small style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: 1 }}>Additional Instructions</small>
+                    <p style={{ margin: '0.25rem 0 0', color: '#374151', fontSize: '0.9rem' }}>{bankDetails.additionalInfo}</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                <p style={{ fontWeight: 600, margin: 0, fontSize: '1.1rem' }}>No bank details configured yet.</p>
+                <p style={{ fontSize: '0.85rem', margin: '0.5rem 0 1.5rem' }}>Add your company's bank account details so clients can make bank transfers.</p>
+                <button type="button" className="btn-solid-green" onClick={() => setBankDetailsModalOpen(true)}>
+                  + Add Bank Details
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -2688,7 +2786,7 @@ export default function ClientManagerDashboard() {
           <div className="light-modal-overlay">
             <div className="light-modal-box" style={{ maxWidth: '640px' }}>
               <div className="modal-head-row">
-                <h3>{editingPayment ? 'Edit Down Payment Record' : 'Record Project Down Payment'}</h3>
+                <h3>{editingPayment ? 'Edit Payment Record' : 'Record Project Payment'}</h3>
                 <button type="button" onClick={() => setPaymentModalOpen(false)}>✕</button>
               </div>
               <form onSubmit={handleSavePayment}>
@@ -2718,7 +2816,7 @@ export default function ClientManagerDashboard() {
                     </div>
 
                     <div className="form-input-box">
-                      <label>Project (Starts Project)</label>
+                      <label>Project</label>
                       <select
                         value={paymentForm.projectId}
                         onChange={(e) => {
@@ -2767,29 +2865,7 @@ export default function ClientManagerDashboard() {
                     </div>
                   </div>
 
-                  {/* Automatic 60-day Validity Notice */}
-                  <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '0.75rem 1rem', margin: '1rem 0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <div>
-                        <strong style={{ color: 'var(--brand-green)', fontSize: '0.9rem' }}>
-                          Automatic Validity: 60 Days from Payment Date
-                        </strong>
-                        <p style={{ margin: '0.15rem 0 0', fontSize: '0.82rem', color: '#166534' }}>
-                          Valid Until: <b>{formatDate(calculateValidityDate(paymentForm.paymentDate))}</b>
-                        </p>
-                      </div>
-                      <div>
-                        <span className={
-                          computeStatusFromDates(paymentForm.paymentDate) === 'Valid' ? 'dp-badge-valid' :
-                          computeStatusFromDates(paymentForm.paymentDate) === 'Expiring Soon' ? 'dp-badge-expiring' : 'dp-badge-expired'
-                        }>
-                          Status: {computeStatusFromDates(paymentForm.paymentDate)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="form-grid-2">
+                  <div className="form-grid-2" style={{ marginTop: '1rem' }}>
                     <div className="form-input-box">
                       <label>Payment Method *</label>
                       <select
@@ -2798,9 +2874,7 @@ export default function ClientManagerDashboard() {
                         required
                       >
                         <option value="BANK_TRANSFER">Bank Transfer</option>
-                        <option value="ONLINE">Online Payment / Gateway</option>
                         <option value="CASH">Cash</option>
-                        <option value="CHEQUE">Cheque</option>
                         <option value="CREDIT_CARD">Credit / Debit Card</option>
                       </select>
                     </div>
@@ -2852,14 +2926,14 @@ export default function ClientManagerDashboard() {
                     </div>
 
                     <div className="form-input-box">
-                      <label>Required Downpayment (LKR)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Optional"
-                        value={paymentForm.requiredDownPayment}
-                        onChange={(e) => setPaymentForm({ ...paymentForm, requiredDownPayment: e.target.value })}
-                      />
+                      <label>Payment Status</label>
+                      <select
+                        value={paymentForm.status || 'Valid'}
+                        onChange={(e) => setPaymentForm({ ...paymentForm, status: e.target.value })}
+                      >
+                        <option value="Valid">Confirmed</option>
+                        <option value="Pending">Pending Verification</option>
+                      </select>
                     </div>
                   </div>
 
@@ -2867,7 +2941,7 @@ export default function ClientManagerDashboard() {
                     <label>Payment Notes / Remarks</label>
                     <textarea
                       rows={2}
-                      placeholder="e.g. Initial 20% down payment to commence project construction"
+                      placeholder="e.g. Payment for construction stage"
                       value={paymentForm.notes}
                       onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                     />
@@ -2875,7 +2949,7 @@ export default function ClientManagerDashboard() {
                 </div>
                 <div className="modal-actions-row">
                   <button type="button" className="btn-outline-green" onClick={() => setPaymentModalOpen(false)}>Cancel</button>
-                  <button type="submit" className="btn-solid-green">{editingPayment ? 'Save Payment Changes' : 'Record Down Payment'}</button>
+                  <button type="submit" className="btn-solid-green">{editingPayment ? 'Save Payment Changes' : 'Record Payment'}</button>
                 </div>
               </form>
             </div>
@@ -3147,6 +3221,92 @@ export default function ClientManagerDashboard() {
             </div>
           </div>
         )}
+
+        {/* BANK DETAILS MODAL */}
+        {bankDetailsModalOpen && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '560px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>PAYMENT SETTINGS</span>
+                  <h3 style={{ margin: '0.2rem 0 0' }}>Edit Company Bank Details</h3>
+                </div>
+                <button type="button" onClick={() => setBankDetailsModalOpen(false)}>✕</button>
+              </div>
+              <form onSubmit={handleSaveBankDetails}>
+                <div className="modal-body-content">
+                  <div className="form-grid-2">
+                    <div className="form-input-box">
+                      <label>Bank Name *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Bank of Ceylon"
+                        value={bankDetailsForm.bankName}
+                        onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, bankName: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="form-input-box">
+                      <label>Branch</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Colombo 03"
+                        value={bankDetailsForm.branch}
+                        onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, branch: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-input-box">
+                      <label>Account Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Company legal name"
+                        value={bankDetailsForm.accountName}
+                        onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, accountName: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div className="form-input-box">
+                      <label>Account Number *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 1234567890"
+                        value={bankDetailsForm.accountNumber}
+                        onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, accountNumber: e.target.value })}
+                        style={{ fontFamily: 'monospace', letterSpacing: 2 }}
+                        required
+                      />
+                    </div>
+                    <div className="form-input-box">
+                      <label>SWIFT / Bank Code</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. BCEYLKLX (optional)"
+                        value={bankDetailsForm.swiftCode}
+                        onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, swiftCode: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                    <label>Additional Instructions (shown to client)</label>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Please use your OD client ID as the payment reference..."
+                      value={bankDetailsForm.additionalInfo}
+                      onChange={(e) => setBankDetailsForm({ ...bankDetailsForm, additionalInfo: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="modal-actions-row">
+                  <button type="button" className="btn-outline-green" onClick={() => setBankDetailsModalOpen(false)}>Cancel</button>
+                  <button type="submit" className="btn-solid-green" disabled={savingBankDetails}>
+                    {savingBankDetails ? 'Saving...' : 'Save Bank Details'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
       </main>
 
       <Footer />
