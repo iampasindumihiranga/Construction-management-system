@@ -137,6 +137,17 @@ public class EmployeeController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/attendance")
+    public ResponseEntity<Void> deleteAttendanceByQuery(
+            @RequestParam(required = false) Long employeeId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
+    ) {
+        if (employeeId != null && date != null) {
+            employeeService.deleteAttendanceByEmployeeAndDate(employeeId, date);
+        }
+        return ResponseEntity.noContent().build();
+    }
+
     // Step 6: Employee Views Assigned Projects
     @GetMapping("/{id:\\d+}/projects")
     public ResponseEntity<List<Project>> getAssignedProjects(@PathVariable Long id) {

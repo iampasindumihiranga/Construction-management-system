@@ -75,12 +75,20 @@ export default function EmployeeManagerDashboard() {
   const [projects, setProjects] = useState([]);
   const [attendanceList, setAttendanceList] = useState([]);
   const [attSummary, setAttSummary] = useState({});
+  const [allAttendanceLogs, setAllAttendanceLogs] = useState([]);
 
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState('');
   const [selectedDate, setSelectedDate] = useState(localDateString());
   const today = localDateString();
-  const isPastDate = selectedDate < today;
+
+  // Attendance Views & Filters
+  const [attSubTab, setAttSubTab] = useState('markTable'); // 'markTable' | 'dayToDayLogs'
+  const [attSearch, setAttSearch] = useState('');
+  const [attStatusFilter, setAttStatusFilter] = useState('ALL');
+  const [attDeptFilter, setAttDeptFilter] = useState('ALL');
+  const [logSearch, setLogSearch] = useState('');
+  const [logStatusFilter, setLogStatusFilter] = useState('ALL');
 
   // Forms
   const [employeeForm, setEmployeeForm] = useState(emptyEmployee);
@@ -107,18 +115,20 @@ export default function EmployeeManagerDashboard() {
   const refreshData = async () => {
     try {
       setLoading(true);
-      const [dashSum, emps, projs, atts, attSum] = await Promise.all([
+      const [dashSum, emps, projs, atts, attSum, allLogs] = await Promise.all([
         getEmployeeDashboardSummary(),
         getAllEmployees(search),
         getProjects(),
         getAttendanceRecords({ date: selectedDate }),
         getAttendanceSummary(selectedDate),
+        getAttendanceRecords({}),
       ]);
       setSummary(dashSum || {});
       setEmployees(emps || []);
       setProjects(projs || []);
       setAttendanceList(atts || []);
       setAttSummary(attSum || {});
+      setAllAttendanceLogs(allLogs || []);
     } catch (err) {
       setError(err.message || 'Error loading employee data.');
     } finally {
@@ -363,6 +373,29 @@ export default function EmployeeManagerDashboard() {
     }
   };
 
+  const shiftSelectedDate = (days) => {
+    const current = new Date(selectedDate + 'T00:00:00');
+    current.setDate(current.getDate() + days);
+    setSelectedDate(localDateString(current));
+  };
+
+  const getStatusConfig = (status) => {
+    switch (status) {
+      case 'PRESENT':
+        return { label: 'Present', icon: '✓', bg: '#dcfce7', text: '#166534', border: '#86efac' };
+      case 'ABSENT':
+        return { label: 'Absent', icon: '✕', bg: '#fee2e2', text: '#991b1b', border: '#fca5a5' };
+      case 'LATE':
+        return { label: 'Late', icon: '⏱', bg: '#fef3c7', text: '#92400e', border: '#fde047' };
+      case 'HALF_DAY':
+        return { label: 'Half Day', icon: '🌗', bg: '#e0f2fe', text: '#0369a1', border: '#7dd3fc' };
+      case 'ON_LEAVE':
+        return { label: 'On Leave', icon: '🏖', bg: '#ede9fe', text: '#6d28d9', border: '#c4b5fd' };
+      default:
+        return { label: 'Unmarked', icon: '⏳', bg: '#f3f4f6', text: '#6b7280', border: '#d1d5db' };
+    }
+  };
+
   const validateAttendance = () => {
     const errors = {};
     if (!attendanceForm.employeeId) {
@@ -387,12 +420,13 @@ export default function EmployeeManagerDashboard() {
 
   const submitAttendance = async (e) => {
     e.preventDefault();
-    if (isPastDate) {
-      setError('Previous days are frozen. Attendance can only be marked for today onwards.');
-      return;
-    }
     if (!validateAttendance()) {
       setError('Please correct the attendance validation errors.');
+      return;
+    }
+    const alreadyMarked = attendanceList.find((a) => a.employee?.id === Number(attendanceForm.employeeId));
+    if (alreadyMarked) {
+      fail(new Error(`Attendance for this employee is already marked for ${formatDate(selectedDate)}. In attendance, records can only be marked once and cannot be changed.`));
       return;
     }
     try {
@@ -406,7 +440,7 @@ export default function EmployeeManagerDashboard() {
         remarks: attendanceForm.remarks,
         recordedBy: 'Employee Manager',
       });
-      report(`Attendance marked as ${attendanceForm.status} for selected employee on ${selectedDate}.`);
+      report(`Attendance marked as ${attendanceForm.status} for selected employee on ${formatDate(selectedDate)}.`);
       setAttendanceForm({
         employeeId: '',
         status: 'PRESENT',
@@ -421,36 +455,80 @@ export default function EmployeeManagerDashboard() {
     }
   };
 
-  const quickMarkAttendance = async (empId, status) => {
-    if (isPastDate) {
-      setError('Previous days are frozen. Attendance can only be marked for today onwards.');
-      return;
-    }
+  const quickMarkAttendance = async (empId, status, empName = '', customRemarks = '') => {
     try {
+      const existing = attendanceList.find((a) => a.employee?.id === empId);
+      if (existing) {
+        fail(new Error(`Attendance for ${empName || 'this employee'} is already marked and locked for ${formatDate(selectedDate)}. In attendance, records can only be marked once and cannot be changed.`));
+        return;
+      }
+
+      let inTime = null;
+      let outTime = null;
+
+      if (['PRESENT', 'LATE', 'HALF_DAY'].includes(status)) {
+        inTime = status === 'LATE' ? '09:30' : '08:00';
+        outTime = status === 'HALF_DAY' ? '12:00' : '17:00';
+      }
+
       await recordAttendance({
         employeeId: empId,
         employee: { id: empId },
         date: selectedDate,
         status: status,
-        checkInTime: status === 'PRESENT' || status === 'LATE' ? '08:00' : null,
-        checkOutTime: status === 'PRESENT' ? '17:00' : null,
-        remarks: status === 'ABSENT' ? 'Recorded as Absent' : 'Quick attendance mark',
+        checkInTime: inTime,
+        checkOutTime: outTime,
+        remarks: customRemarks || (status === 'ABSENT' ? 'Recorded as Absent' : `Marked as ${status}`),
         recordedBy: 'Employee Manager',
       });
-      report(`Attendance for employee marked as ${status}.`);
+      report(`Attendance for ${empName || 'employee'} marked as ${status} on ${formatDate(selectedDate)}.`);
       await refreshData();
     } catch (err) {
       fail(err);
     }
   };
 
-  const removeAttendance = async (id) => {
+  const handleStatusChange = async (emp, newStatus) => {
+    if (!newStatus) return;
+    const existing = attendanceList.find((a) => a.employee?.id === emp.id);
+    if (existing) {
+      fail(new Error(`Attendance for ${emp.name} is already marked and locked for ${formatDate(selectedDate)}. In attendance, records can only be marked once and cannot be changed.`));
+      return;
+    }
+    await quickMarkAttendance(emp.id, newStatus, emp.name);
+  };
+
+  const markAllUnmarkedPresent = async () => {
+    const unmarked = employees.filter((emp) => !attendanceList.some((a) => a.employee?.id === emp.id));
+    if (unmarked.length === 0) {
+      report('All employees are already marked for this date.');
+      return;
+    }
+    if (!window.confirm(`Mark all ${unmarked.length} remaining unmarked employee(s) as Present for ${formatDate(selectedDate)}? (Note: Once marked, attendance is permanent and cannot be changed.)`)) {
+      return;
+    }
     try {
-      await deleteAttendanceRecord(id);
-      report('Attendance record removed.');
+      setLoading(true);
+      await Promise.all(
+        unmarked.map((emp) =>
+          recordAttendance({
+            employeeId: emp.id,
+            employee: { id: emp.id },
+            date: selectedDate,
+            status: 'PRESENT',
+            checkInTime: '08:00',
+            checkOutTime: '17:00',
+            remarks: 'Bulk marked Present',
+            recordedBy: 'Employee Manager',
+          })
+        )
+      );
+      report(`Successfully marked ${unmarked.length} staff member(s) as Present.`);
       await refreshData();
     } catch (err) {
       fail(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -462,6 +540,55 @@ export default function EmployeeManagerDashboard() {
       return true;
     });
   }, [employees, filterRole]);
+
+  const filteredAttendanceEmployees = useMemo(() => {
+    return employees.filter((emp) => {
+      if (attSearch.trim()) {
+        const q = attSearch.toLowerCase().trim();
+        const matchesName = emp.name?.toLowerCase().includes(q);
+        const matchesId = emp.employeeId?.toLowerCase().includes(q);
+        const matchesRole = emp.role?.toLowerCase().includes(q) || emp.position?.toLowerCase().includes(q);
+        if (!matchesName && !matchesId && !matchesRole) return false;
+      }
+      if (attDeptFilter && attDeptFilter !== 'ALL') {
+        if (emp.department !== attDeptFilter) return false;
+      }
+      if (attStatusFilter && attStatusFilter !== 'ALL') {
+        const record = attendanceList.find((a) => a.employee?.id === emp.id);
+        const status = record ? record.status : 'UNMARKED';
+        if (attStatusFilter === 'UNMARKED' && status !== 'UNMARKED') return false;
+        if (attStatusFilter !== 'UNMARKED' && status !== attStatusFilter) return false;
+      }
+      return true;
+    });
+  }, [employees, attendanceList, attSearch, attDeptFilter, attStatusFilter]);
+
+  const groupedLogs = useMemo(() => {
+    let filtered = allAttendanceLogs;
+    if (logSearch.trim()) {
+      const q = logSearch.toLowerCase().trim();
+      filtered = filtered.filter(
+        (l) =>
+          l.employee?.name?.toLowerCase().includes(q) ||
+          l.employee?.employeeId?.toLowerCase().includes(q) ||
+          l.employee?.role?.toLowerCase().includes(q) ||
+          l.remarks?.toLowerCase().includes(q)
+      );
+    }
+    if (logStatusFilter && logStatusFilter !== 'ALL') {
+      filtered = filtered.filter((l) => l.status === logStatusFilter);
+    }
+
+    const groups = {};
+    for (const log of filtered) {
+      const dateKey = log.date || 'Unspecified Date';
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(log);
+    }
+    return groups;
+  }, [allAttendanceLogs, logSearch, logStatusFilter]);
 
   const employeesAssignedTo = (projectId) => employees.filter((employee) => {
     const assignedIds = employee.assignedProjects?.map((project) => project.id) || [];
@@ -594,6 +721,118 @@ export default function EmployeeManagerDashboard() {
                   </button>
                 </div>
               </div>
+            </div>
+
+            {/* Day-to-Day Attendance Activity & Record Logs */}
+            <div style={{ marginTop: '24px', background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ margin: 0, color: '#111827', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📋</span> Day-to-Day Attendance Record Logs
+                  </h3>
+                  <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                    Chronological workforce attendance activity, ordered day by day.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTab('attendance');
+                    setAttSubTab('dayToDayLogs');
+                  }}
+                  style={{ padding: '8px 16px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '8px', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer' }}
+                >
+                  View All Attendance Logs &rarr;
+                </button>
+              </div>
+
+              {allAttendanceLogs.length === 0 ? (
+                <div style={{ padding: '28px', textAlign: 'center', color: '#6b7280', background: '#f9fafb', borderRadius: '8px' }}>
+                  No attendance records logged yet.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '750px' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>DATE</th>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>STAFF</th>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>ROLE / TRADE</th>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>STATUS</th>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>TIME IN / OUT</th>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>REMARKS</th>
+                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem', textAlign: 'right' }}>STATUS / AUDIT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allAttendanceLogs.slice(0, 10).map((log) => {
+                        const conf = getStatusConfig(log.status);
+                        return (
+                          <tr key={log.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827', fontSize: '0.85rem' }}>
+                              {formatDate(log.date)}
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.9rem' }}>
+                                {log.employee?.name || 'Staff Member'}
+                              </div>
+                              <span style={{ fontSize: '0.75rem', color: '#047857', background: '#ecfdf5', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                {log.employee?.employeeId || `EMP-${log.employee?.id}`}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px 14px', fontSize: '0.85rem', color: '#4b5563' }}>
+                              {log.employee?.role || log.employee?.position || 'General'}
+                            </td>
+                            <td style={{ padding: '12px 14px' }}>
+                              <span style={{
+                                padding: '3px 9px',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                background: conf.bg,
+                                color: conf.text,
+                                border: `1px solid ${conf.border}`,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}>
+                                <span>{conf.icon}</span> {conf.label}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: '#4b5563' }}>
+                              {log.checkInTime ? `${log.checkInTime} - ${log.checkOutTime || '—'}` : '—'}
+                            </td>
+                            <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: '#6b7280', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={log.remarks}>
+                              {log.remarks || '—'}
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                              <span style={{
+                                fontSize: '0.75rem',
+                                color: '#047857',
+                                background: '#ecfdf5',
+                                border: '1px solid #a7f3d0',
+                                padding: '3px 9px',
+                                borderRadius: '6px',
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}>
+                                🔒 Finalized Log
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {allAttendanceLogs.length > 10 && (
+                    <div style={{ padding: '10px 14px', textAlign: 'center', background: '#f9fafb', borderTop: '1px solid #e5e7eb', fontSize: '0.8rem', color: '#6b7280' }}>
+                      Showing 10 most recent records of {allAttendanceLogs.length} total. Click "View All Attendance Logs" to inspect complete history.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1172,210 +1411,634 @@ export default function EmployeeManagerDashboard() {
         {/* TAB 6: STEP 5 - ATTENDANCE REGISTER */}
         {tab === 'attendance' && (
           <div>
-            {/* Header / Date Selector */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', background: '#fff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.2rem' }}>
-                  Daily Attendance Register
-                </h3>
-                <p style={{ color: '#6b7280', margin: 0, fontSize: '0.85rem' }}>
-                  Record and monitor daily site attendance for all construction personnel.
-                </p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#374151' }}>Date:</label>
-                <input
-                  type="date"
-                  min={today}
-                  value={selectedDate}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedDate(!val || val < today ? today : val);
-                  }}
-                  style={{ padding: '8px 12px', borderRadius: '8px', border: `1px solid ${isPastDate ? '#fca5a5' : '#d1d5db'}`, fontWeight: 600 }}
-                />
-                {isPastDate ? (
-                  <span style={{ fontSize: '0.78rem', background: '#fee2e2', color: '#991b1b', padding: '3px 8px', borderRadius: '6px', fontWeight: 600 }}>
-                    🔒 Past date — view only
-                  </span>
-                ) : (
-                  <span style={{ fontSize: '0.78rem', background: '#ecfdf5', color: '#065f46', padding: '3px 8px', borderRadius: '6px', fontWeight: 600 }}>
-                    ✅ Today — marking enabled
-                  </span>
-                )}
-              </div>
-            </div>
+            {/* Top Workspace Header & View Switcher */}
+            <div style={{ background: '#fff', padding: '20px 24px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+                <div>
+                  <h2 style={{ margin: 0, color: '#111827', fontSize: '1.4rem', fontWeight: 800 }}>
+                    Workforce Attendance Management
+                  </h2>
+                  <p style={{ color: '#6b7280', margin: '4px 0 0', fontSize: '0.88rem' }}>
+                    Mark daily site attendance, update staff statuses, clear marked records, or inspect day-to-day activity logs.
+                  </p>
+                </div>
 
-            {/* Quick Metrics for selected date */}
-            <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-              <div style={{ background: '#ecfdf5', padding: '14px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                <span style={{ fontSize: '0.8rem', color: '#065f46', fontWeight: 600 }}>PRESENT TODAY</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#065f46' }}>{attSummary.presentCount ?? 0}</div>
-              </div>
-              <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                <span style={{ fontSize: '0.8rem', color: '#991b1b', fontWeight: 600 }}>ABSENT TODAY</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#991b1b' }}>{attSummary.absentCount ?? 0}</div>
-              </div>
-              <div style={{ background: '#fffbeb', padding: '14px', borderRadius: '8px', border: '1px solid #fde68a' }}>
-                <span style={{ fontSize: '0.8rem', color: '#92400e', fontWeight: 600 }}>LATE / ON LEAVE</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#92400e' }}>
-                  {(attSummary.lateCount ?? 0) + (attSummary.onLeaveCount ?? 0)}
+                {/* Sub-view switcher tabs */}
+                <div style={{ display: 'inline-flex', background: '#f3f4f6', padding: '4px', borderRadius: '10px', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setAttSubTab('markTable')}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: attSubTab === 'markTable' ? '#047857' : 'transparent',
+                      color: attSubTab === 'markTable' ? '#ffffff' : '#374151',
+                      fontWeight: 700,
+                      fontSize: '0.88rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span>📝</span> Daily Marking Register Table
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAttSubTab('dayToDayLogs')}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: attSubTab === 'dayToDayLogs' ? '#047857' : 'transparent',
+                      color: attSubTab === 'dayToDayLogs' ? '#ffffff' : '#374151',
+                      fontWeight: 700,
+                      fontSize: '0.88rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span>📜</span> Day-to-Day Record Logs
+                    <span style={{
+                      background: attSubTab === 'dayToDayLogs' ? 'rgba(255,255,255,0.25)' : '#e5e7eb',
+                      color: attSubTab === 'dayToDayLogs' ? '#ffffff' : '#374151',
+                      padding: '1px 8px',
+                      borderRadius: '10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                    }}>
+                      {allAttendanceLogs.length}
+                    </span>
+                  </button>
                 </div>
               </div>
-              <div style={{ background: '#f3f4f6', padding: '14px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                <span style={{ fontSize: '0.8rem', color: '#374151', fontWeight: 600 }}>UNMARKED STAFF</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#374151' }}>{attSummary.unmarkedCount ?? 0}</div>
-              </div>
-            </section>
 
-            {/* Staff Attendance Quick Grid */}
-            <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', overflowX: 'auto', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb', fontWeight: 600, color: '#111827' }}>
-                Quick Mark Register for {formatDate(selectedDate)}
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '700px' }}>
-                <thead style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
-                  <tr>
-                    <th style={{ padding: '10px 16px', color: '#4b5563', fontSize: '0.85rem' }}>STAFF</th>
-                    <th style={{ padding: '10px 16px', color: '#4b5563', fontSize: '0.85rem' }}>TRADE / ROLE</th>
-                    <th style={{ padding: '10px 16px', color: '#4b5563', fontSize: '0.85rem' }}>TODAY STATUS</th>
-                    <th style={{ padding: '10px 16px', color: '#4b5563', fontSize: '0.85rem', textAlign: 'right' }}>QUICK ACTION</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {employees.map((emp) => {
-                    const record = attendanceList.find((a) => a.employee?.id === emp.id);
-                    const currentStatus = record ? record.status : 'UNMARKED';
+              {/* Date Navigation Bar (always accessible) */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', paddingTop: '16px', borderTop: '1px solid #f3f4f6' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#374151' }}>Selected Date:</span>
+                  <button
+                    type="button"
+                    onClick={() => shiftSelectedDate(-1)}
+                    style={{ padding: '6px 12px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}
+                    title="Previous Day"
+                  >
+                    &larr; Prev Day
+                  </button>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => {
+                      if (e.target.value) setSelectedDate(e.target.value);
+                    }}
+                    style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #047857', fontWeight: 700, color: '#111827', fontSize: '0.9rem' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => shiftSelectedDate(1)}
+                    style={{ padding: '6px 12px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}
+                    title="Next Day"
+                  >
+                    Next Day &rarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate(today)}
+                    style={{
+                      padding: '6px 12px',
+                      background: selectedDate === today ? '#ecfdf5' : '#f3f4f6',
+                      border: `1px solid ${selectedDate === today ? '#86efac' : '#d1d5db'}`,
+                      color: selectedDate === today ? '#047857' : '#374151',
+                      borderRadius: '6px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Today
+                  </button>
+                </div>
 
-                    return (
-                      <tr key={emp.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontWeight: 600, color: '#111827' }}>{emp.name}</span>
-                          <span style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '8px' }}>({emp.employeeId})</span>
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: '0.85rem', color: '#374151' }}>
-                          {emp.role || emp.position}
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span style={{
-                            padding: '3px 8px',
-                            borderRadius: '12px',
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            background:
-                              currentStatus === 'PRESENT'
-                                ? '#dcfce7'
-                                : currentStatus === 'ABSENT'
-                                ? '#fee2e2'
-                                : currentStatus === 'LATE'
-                                ? '#fef3c7'
-                                : currentStatus === 'ON_LEAVE'
-                                ? '#e0e7ff'
-                                : '#f3f4f6',
-                            color:
-                              currentStatus === 'PRESENT'
-                                ? '#166534'
-                                : currentStatus === 'ABSENT'
-                                ? '#991b1b'
-                                : currentStatus === 'LATE'
-                                ? '#92400e'
-                                : currentStatus === 'ON_LEAVE'
-                                ? '#3730a3'
-                                : '#6b7280',
-                          }}>
-                            {currentStatus}
-                          </span>
-                          {record?.remarks && (
-                            <span style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '6px' }}>
-                              - {record.remarks}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              disabled={isPastDate}
-                              onClick={() => quickMarkAttendance(emp.id, 'PRESENT')}
-                              style={{ padding: '4px 8px', background: '#dcfce7', border: '1px solid #86efac', color: '#166534', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, cursor: isPastDate ? 'not-allowed' : 'pointer', opacity: isPastDate ? 0.5 : 1 }}
-                            >
-                              Present
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isPastDate}
-                              onClick={() => quickMarkAttendance(emp.id, 'ABSENT')}
-                              style={{ padding: '4px 8px', background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, cursor: isPastDate ? 'not-allowed' : 'pointer', opacity: isPastDate ? 0.5 : 1 }}
-                            >
-                              Absent
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isPastDate}
-                              onClick={() => quickMarkAttendance(emp.id, 'LATE')}
-                              style={{ padding: '4px 8px', background: '#fef3c7', border: '1px solid #fde047', color: '#92400e', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, cursor: isPastDate ? 'not-allowed' : 'pointer', opacity: isPastDate ? 0.5 : 1 }}
-                            >
-                              Late
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isPastDate}
-                              onClick={() => quickMarkAttendance(emp.id, 'ON_LEAVE')}
-                              style={{ padding: '4px 8px', background: '#e0e7ff', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, cursor: isPastDate ? 'not-allowed' : 'pointer', opacity: isPastDate ? 0.5 : 1 }}
-                            >
-                              Leave
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    background: selectedDate === today ? '#ecfdf5' : '#eff6ff',
+                    color: selectedDate === today ? '#166534' : '#1d4ed8',
+                    border: `1px solid ${selectedDate === today ? '#a7f3d0' : '#bfdbfe'}`,
+                  }}>
+                    {selectedDate === today ? '📍 Managing Today\'s Register' : `📅 Date: ${formatDate(selectedDate)}`}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            {/* Attendance Detail Form & Detailed Log */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-              {/* Detailed Form */}
-              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <h4 style={{ margin: '0 0 12px', color: '#111827' }}>Detailed Attendance &amp; Check-In Entry</h4>
-                <form onSubmit={submitAttendance} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Employee *</label>
-                    <select
-                      value={attendanceForm.employeeId}
-                      onChange={(e) => {
-                        setAttendanceForm({ ...attendanceForm, employeeId: e.target.value });
-                        if (attFormErrors.employeeId) setAttFormErrors({ ...attFormErrors, employeeId: '' });
-                      }}
-                      required
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.employeeId ? '#ef4444' : '#d1d5db'}` }}
-                    >
-                      <option value="">-- Choose Employee --</option>
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name} ({emp.employeeId}) - {emp.role}
-                        </option>
-                      ))}
-                    </select>
-                    {attFormErrors.employeeId && (
-                      <span style={{ color: '#ef4444', fontSize: '0.78rem', display: 'block', marginTop: '4px' }}>
-                        {attFormErrors.employeeId}
-                      </span>
-                    )}
+            {/* VIEW 1: DAILY MARKING REGISTER TABLE */}
+            {attSubTab === 'markTable' && (
+              <div>
+                {/* Quick Metrics for selected date */}
+                <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+                  <div style={{ background: '#ffffff', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 700, textTransform: 'uppercase' }}>TOTAL WORKFORCE</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#111827', marginTop: '4px' }}>{employees.length}</div>
+                  </div>
+                  <div style={{ background: '#ecfdf5', padding: '16px', borderRadius: '10px', border: '1px solid #a7f3d0' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#065f46', fontWeight: 700, textTransform: 'uppercase' }}>PRESENT</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#065f46', marginTop: '4px' }}>{attSummary.presentCount ?? 0}</div>
+                  </div>
+                  <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#991b1b', fontWeight: 700, textTransform: 'uppercase' }}>ABSENT</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#991b1b', marginTop: '4px' }}>{attSummary.absentCount ?? 0}</div>
+                  </div>
+                  <div style={{ background: '#fffbeb', padding: '16px', borderRadius: '10px', border: '1px solid #fde68a' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#92400e', fontWeight: 700, textTransform: 'uppercase' }}>LATE / LEAVE / HALF</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#92400e', marginTop: '4px' }}>
+                      {(attSummary.lateCount ?? 0) + (attSummary.onLeaveCount ?? 0)}
+                    </div>
+                  </div>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', border: '1px solid #cbd5e1' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase' }}>UNMARKED</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#475569', marginTop: '4px' }}>{attSummary.unmarkedCount ?? 0}</div>
+                  </div>
+                </section>
+
+                {/* Filter and Quick Action Toolbar */}
+                <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '16px', marginBottom: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                    <div style={{ display: 'flex', gap: '10px', flex: 1, minWidth: '280px', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        placeholder="Search employee name, ID, role..."
+                        value={attSearch}
+                        onChange={(e) => setAttSearch(e.target.value)}
+                        style={{ flex: 1, minWidth: '200px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem' }}
+                      />
+                      <select
+                        value={attDeptFilter}
+                        onChange={(e) => setAttDeptFilter(e.target.value)}
+                        style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem' }}
+                      >
+                        <option value="ALL">All Departments</option>
+                        {DEPARTMENTS.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={markAllUnmarkedPresent}
+                        style={{
+                          padding: '9px 14px',
+                          background: '#047857',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>⚡</span> Mark Unmarked as Present
+                      </button>
+                    </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Status *</label>
-                      <select
-                        value={attendanceForm.status}
-                        onChange={(e) => {
-                          setAttendanceForm({ ...attendanceForm, status: e.target.value });
-                          if (attFormErrors.status) setAttFormErrors({ ...attFormErrors, status: '' });
+                  {/* Status Filter Buttons */}
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#4b5563', marginRight: '4px' }}>Filter Status:</span>
+                    {[
+                      { key: 'ALL', label: 'All', count: employees.length },
+                      { key: 'UNMARKED', label: 'Unmarked', count: attSummary.unmarkedCount ?? 0 },
+                      { key: 'PRESENT', label: 'Present', count: attSummary.presentCount ?? 0 },
+                      { key: 'ABSENT', label: 'Absent', count: attSummary.absentCount ?? 0 },
+                      { key: 'LATE', label: 'Late', count: attSummary.lateCount ?? 0 },
+                      { key: 'HALF_DAY', label: 'Half Day', count: attendanceList.filter((a) => a.status === 'HALF_DAY').length },
+                      { key: 'ON_LEAVE', label: 'On Leave', count: attSummary.onLeaveCount ?? 0 },
+                    ].map((btn) => (
+                      <button
+                        key={btn.key}
+                        type="button"
+                        onClick={() => setAttStatusFilter(btn.key)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '16px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          border: attStatusFilter === btn.key ? '1px solid #047857' : '1px solid #e5e7eb',
+                          background: attStatusFilter === btn.key ? '#ecfdf5' : '#f9fafb',
+                          color: attStatusFilter === btn.key ? '#047857' : '#4b5563',
+                          cursor: 'pointer',
                         }}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.status ? '#ef4444' : '#d1d5db'}` }}
                       >
+                        {btn.label} ({btn.count})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* THE DAILY ATTENDANCE MARKING TABLE */}
+                <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', overflowX: 'auto', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div style={{ padding: '14px 18px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.95rem' }}>
+                      📋 Attendance Marking Register Table — {formatDate(selectedDate)}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>
+                      Showing {filteredAttendanceEmployees.length} employee(s) • Unmarked staff can be marked once. Once recorded, attendance is locked permanently.
+                    </div>
+                  </div>
+
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '950px' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '12px 16px', color: '#4b5563', fontSize: '0.82rem', fontWeight: 700 }}>STAFF MEMBER</th>
+                        <th style={{ padding: '12px 16px', color: '#4b5563', fontSize: '0.82rem', fontWeight: 700 }}>TRADE &amp; DEPARTMENT</th>
+                        <th style={{ padding: '12px 16px', color: '#4b5563', fontSize: '0.82rem', fontWeight: 700 }}>ATTENDANCE STATUS</th>
+                        <th style={{ padding: '12px 16px', color: '#4b5563', fontSize: '0.82rem', fontWeight: 700 }}>TIME IN / OUT</th>
+                        <th style={{ padding: '12px 16px', color: '#4b5563', fontSize: '0.82rem', fontWeight: 700 }}>SITE REMARKS</th>
+                        <th style={{ padding: '12px 16px', color: '#4b5563', fontSize: '0.82rem', fontWeight: 700, textAlign: 'right' }}>QUICK ACTIONS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAttendanceEmployees.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#6b7280' }}>
+                            No employees found matching the filter criteria.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAttendanceEmployees.map((emp) => {
+                          const record = attendanceList.find((a) => a.employee?.id === emp.id);
+                          const currentStatus = record ? record.status : 'UNMARKED';
+                          const statusConf = getStatusConfig(currentStatus);
+
+                          return (
+                            <tr key={emp.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                              {/* 1. Staff Member */}
+                              <td style={{ padding: '12px 16px' }}>
+                                <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.92rem' }}>
+                                  {emp.name}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '1px 6px', borderRadius: '4px' }}>
+                                    {emp.employeeId || `EMP-${emp.id}`}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                    {emp.phone || emp.email || ''}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* 2. Trade & Department */}
+                              <td style={{ padding: '12px 16px' }}>
+                                <div style={{ fontWeight: 600, color: '#374151', fontSize: '0.85rem' }}>
+                                  {emp.role || emp.position}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                  {emp.department || 'General'}
+                                </div>
+                              </td>
+
+                              {/* 3. Attendance Status */}
+                              <td style={{ padding: '12px 16px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' }}>
+                                  {/* Status Badge */}
+                                  <span style={{
+                                    padding: '3px 10px',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    background: statusConf.bg,
+                                    color: statusConf.text,
+                                    border: `1px solid ${statusConf.border}`,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                  }}>
+                                    <span>{statusConf.icon}</span> {statusConf.label}
+                                  </span>
+
+                                  {record ? (
+                                    <span style={{
+                                      fontSize: '0.72rem',
+                                      color: '#047857',
+                                      background: '#ecfdf5',
+                                      border: '1px solid #a7f3d0',
+                                      padding: '2px 8px',
+                                      borderRadius: '4px',
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                    }}>
+                                      🔒 Marked &amp; Locked
+                                    </span>
+                                  ) : (
+                                    <select
+                                      value=""
+                                      onChange={(e) => handleStatusChange(emp, e.target.value)}
+                                      style={{
+                                        padding: '4px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '0.78rem',
+                                        fontWeight: 600,
+                                        border: '1px solid #10b981',
+                                        background: '#ffffff',
+                                        color: '#047857',
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Mark attendance (once marked, cannot be changed)"
+                                    >
+                                      <option value="" disabled>Select Status to Mark...</option>
+                                      <option value="PRESENT">✓ Present (Full Day)</option>
+                                      <option value="ABSENT">✕ Absent</option>
+                                      <option value="LATE">⏱ Late (Delayed arrival)</option>
+                                      <option value="HALF_DAY">🌗 Half Day (4 Hours)</option>
+                                      <option value="ON_LEAVE">🏖 On Leave</option>
+                                    </select>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* 4. Time In / Out */}
+                              <td style={{ padding: '12px 16px', fontSize: '0.82rem', color: '#4b5563' }}>
+                                {['PRESENT', 'LATE', 'HALF_DAY'].includes(currentStatus) ? (
+                                  <div>
+                                    <div><b>In:</b> {record?.checkInTime || '08:00'}</div>
+                                    <div><b>Out:</b> {record?.checkOutTime || (currentStatus === 'HALF_DAY' ? '12:00' : '17:00')}</div>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#9ca3af' }}>—</span>
+                                )}
+                              </td>
+
+                              {/* 5. Site Remarks */}
+                              <td style={{ padding: '12px 16px', maxWidth: '200px' }}>
+                                <div
+                                  style={{ fontSize: '0.82rem', color: record?.remarks ? '#374151' : '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                  title={record?.remarks || 'No remarks logged'}
+                                >
+                                  {record?.remarks || '—'}
+                                </div>
+                              </td>
+
+                              {/* 6. Quick Actions */}
+                              <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                                {record ? (
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    padding: '5px 12px',
+                                    borderRadius: '6px',
+                                    background: '#ecfdf5',
+                                    border: '1px solid #a7f3d0',
+                                    color: '#047857',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 700,
+                                  }}>
+                                    🔒 Marked &amp; Finalized
+                                  </span>
+                                ) : (
+                                  <div style={{ display: 'inline-flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => quickMarkAttendance(emp.id, 'PRESENT', emp.name)}
+                                      style={{
+                                        padding: '4px 8px',
+                                        background: '#ecfdf5',
+                                        color: '#047857',
+                                        border: '1px solid #86efac',
+                                        borderRadius: '4px',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Mark Present (cannot be changed once marked)"
+                                    >
+                                      Present
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => quickMarkAttendance(emp.id, 'ABSENT', emp.name)}
+                                      style={{
+                                        padding: '4px 8px',
+                                        background: '#fef2f2',
+                                        color: '#991b1b',
+                                        border: '1px solid #fca5a5',
+                                        borderRadius: '4px',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Mark Absent (cannot be changed once marked)"
+                                    >
+                                      Absent
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => quickMarkAttendance(emp.id, 'LATE', emp.name)}
+                                      style={{
+                                        padding: '4px 8px',
+                                        background: '#fffbeb',
+                                        color: '#92400e',
+                                        border: '1px solid #fde047',
+                                        borderRadius: '4px',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Mark Late (cannot be changed once marked)"
+                                    >
+                                      Late
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => quickMarkAttendance(emp.id, 'HALF_DAY', emp.name)}
+                                      style={{
+                                        padding: '4px 8px',
+                                        background: '#f0f9ff',
+                                        color: '#0369a1',
+                                        border: '1px solid #7dd3fc',
+                                        borderRadius: '4px',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Mark Half Day (cannot be changed once marked)"
+                                    >
+                                      Half
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => quickMarkAttendance(emp.id, 'ON_LEAVE', emp.name)}
+                                      style={{
+                                        padding: '4px 8px',
+                                        background: '#f5f3ff',
+                                        color: '#6d28d9',
+                                        border: '1px solid #c4b5fd',
+                                        borderRadius: '4px',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                      title="Mark On Leave (cannot be changed once marked)"
+                                    >
+                                      Leave
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Collapsible Manual Detailed Entry Card */}
+                <details style={{ background: '#fff', borderRadius: '12px', padding: '16px 20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <summary style={{ fontWeight: 700, color: '#374151', cursor: 'pointer', fontSize: '0.92rem' }}>
+                    ➕ Manual Custom Attendance Entry (Click to expand)
+                  </summary>
+                  <div style={{ marginTop: '16px' }}>
+                    <form onSubmit={submitAttendance} noValidate style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', alignItems: 'flex-end' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Employee *</label>
+                        <select
+                          value={attendanceForm.employeeId}
+                          onChange={(e) => {
+                            setAttendanceForm({ ...attendanceForm, employeeId: e.target.value });
+                            if (attFormErrors.employeeId) setAttFormErrors({ ...attFormErrors, employeeId: '' });
+                          }}
+                          required
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.employeeId ? '#ef4444' : '#d1d5db'}` }}
+                        >
+                          <option value="">-- Choose Employee --</option>
+                          {employees.map((emp) => {
+                            const isMarked = attendanceList.some((a) => a.employee?.id === emp.id);
+                            return (
+                              <option key={emp.id} value={emp.id} disabled={isMarked}>
+                                {emp.name} ({emp.employeeId || `EMP-${emp.id}`}) - {emp.role} {isMarked ? '🔒 (Marked & Locked)' : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {attFormErrors.employeeId && (
+                          <span style={{ color: '#ef4444', fontSize: '0.78rem', display: 'block', marginTop: '4px' }}>
+                            {attFormErrors.employeeId}
+                          </span>
+                        )}
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Status *</label>
+                        <select
+                          value={attendanceForm.status}
+                          onChange={(e) => {
+                            setAttendanceForm({ ...attendanceForm, status: e.target.value });
+                            if (attFormErrors.status) setAttFormErrors({ ...attFormErrors, status: '' });
+                          }}
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.status ? '#ef4444' : '#d1d5db'}` }}
+                        >
+                          {ATTENDANCE_STATUSES.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {['PRESENT', 'LATE', 'HALF_DAY'].includes(attendanceForm.status) && (
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Check-In Time</label>
+                          <input
+                            type="time"
+                            value={attendanceForm.checkInTime}
+                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkInTime: e.target.value })}
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                          />
+                        </div>
+                      )}
+
+                      {['PRESENT', 'HALF_DAY'].includes(attendanceForm.status) && (
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Check-Out Time</label>
+                          <input
+                            type="time"
+                            value={attendanceForm.checkOutTime}
+                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkOutTime: e.target.value })}
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                          />
+                        </div>
+                      )}
+
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Remarks / Site Notes</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Morning foundation inspection, Sick leave approved..."
+                          value={attendanceForm.remarks}
+                          onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                        />
+                      </div>
+
+                      <div>
+                        <button
+                          type="submit"
+                          style={{ width: '100%', padding: '10px 16px', background: '#047857', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          Record Attendance
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </details>
+              </div>
+            )}
+
+            {/* VIEW 2: DAY-TO-DAY RECORD LOGS */}
+            {attSubTab === 'dayToDayLogs' && (
+              <div>
+                {/* Search & Filter Header for Logs */}
+                <div style={{ background: '#fff', borderRadius: '12px', padding: '18px 20px', border: '1px solid #e5e7eb', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+                    <div>
+                      <h3 style={{ margin: 0, color: '#111827', fontSize: '1.25rem', fontWeight: 800 }}>
+                        Day-to-Day Attendance Master Record Logs
+                      </h3>
+                      <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                        Complete log history of site attendance ordered chronologically day by day.
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        placeholder="Search employee name, ID, notes..."
+                        value={logSearch}
+                        onChange={(e) => setLogSearch(e.target.value)}
+                        style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.85rem', minWidth: '240px' }}
+                      />
+                      <select
+                        value={logStatusFilter}
+                        onChange={(e) => setLogStatusFilter(e.target.value)}
+                        style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.85rem' }}
+                      >
+                        <option value="ALL">All Statuses</option>
                         {ATTENDANCE_STATUSES.map((st) => (
                           <option key={st} value={st}>
                             {st}
@@ -1383,106 +2046,175 @@ export default function EmployeeManagerDashboard() {
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Check-In Time</label>
-                      <input
-                        type="time"
-                        value={attendanceForm.checkInTime}
-                        onChange={(e) => {
-                          setAttendanceForm({ ...attendanceForm, checkInTime: e.target.value });
-                          if (attFormErrors.checkInTime) setAttFormErrors({ ...attFormErrors, checkInTime: '' });
-                        }}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.checkInTime ? '#ef4444' : '#d1d5db'}` }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Check-Out Time</label>
-                      <input
-                        type="time"
-                        value={attendanceForm.checkOutTime}
-                        onChange={(e) => {
-                          setAttendanceForm({ ...attendanceForm, checkOutTime: e.target.value });
-                          if (attFormErrors.checkOutTime) setAttFormErrors({ ...attFormErrors, checkOutTime: '' });
-                        }}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.checkOutTime ? '#ef4444' : '#d1d5db'}` }}
-                      />
-                    </div>
                   </div>
-                  {attFormErrors.checkInTime && (
-                    <span style={{ color: '#ef4444', fontSize: '0.78rem', display: 'block' }}>
-                      {attFormErrors.checkInTime}
-                    </span>
-                  )}
-                  {attFormErrors.checkOutTime && (
-                    <span style={{ color: '#ef4444', fontSize: '0.78rem', display: 'block' }}>
-                      {attFormErrors.checkOutTime}
-                    </span>
-                  )}
+                </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Remarks / Site Notes</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Morning foundation inspection, Sick leave approved..."
-                      value={attendanceForm.remarks}
-                      onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                    />
+                {/* Day-to-Day Grouped View */}
+                {Object.keys(groupedLogs).length === 0 ? (
+                  <div style={{ background: '#fff', borderRadius: '12px', padding: '48px 20px', textAlign: 'center', border: '1px solid #e5e7eb', color: '#6b7280' }}>
+                    <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📜</div>
+                    <h3 style={{ color: '#111827', margin: '0 0 6px' }}>No Attendance Logs Found</h3>
+                    <p style={{ margin: 0, fontSize: '0.88rem' }}>
+                      {logSearch || logStatusFilter !== 'ALL'
+                        ? 'Try clearing the search or status filters above.'
+                        : 'No attendance records have been logged yet.'}
+                    </p>
                   </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {Object.entries(groupedLogs).map(([dateKey, dayLogs]) => {
+                      const dayPresent = dayLogs.filter((l) => l.status === 'PRESENT').length;
+                      const dayAbsent = dayLogs.filter((l) => l.status === 'ABSENT').length;
+                      const dayLate = dayLogs.filter((l) => l.status === 'LATE').length;
 
-                  <button
-                    type="submit"
-                    disabled={isPastDate}
-                    style={{ padding: '10px 16px', background: '#047857', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: isPastDate ? 'not-allowed' : 'pointer', marginTop: '4px', opacity: isPastDate ? 0.6 : 1 }}
-                  >
-                    Record Attendance
-                  </button>
-                </form>
-              </div>
+                      return (
+                        <div key={dateKey} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                          {/* Day Header Banner */}
+                          <div style={{
+                            padding: '12px 18px',
+                            background: dateKey === today ? '#ecfdf5' : '#f9fafb',
+                            borderBottom: '1px solid #e5e7eb',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '10px',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <span style={{ fontSize: '1rem', fontWeight: 800, color: dateKey === today ? '#065f46' : '#111827' }}>
+                                📅 {formatDate(dateKey)}
+                              </span>
+                              {dateKey === today && (
+                                <span style={{ background: '#047857', color: '#fff', padding: '2px 8px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 800 }}>
+                                  TODAY
+                                </span>
+                              )}
+                            </div>
 
-              {/* Recorded Logs for the Date */}
-              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <h4 style={{ margin: '0 0 12px', color: '#111827' }}>Recorded Logs ({attendanceList.length})</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
-                  {attendanceList.length === 0 ? (
-                    <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>No attendance records recorded for this date yet.</p>
-                  ) : (
-                    attendanceList.map((att) => (
-                      <div
-                        key={att.id}
-                        style={{
-                          padding: '10px 12px',
-                          borderRadius: '6px',
-                          background: '#f9fafb',
-                          border: '1px solid #e5e7eb',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#111827' }}>
-                            {att.employee?.name}{' '}
-                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>({att.employee?.employeeId})</span>
+                            <div style={{ display: 'flex', gap: '8px', fontSize: '0.78rem', fontWeight: 700 }}>
+                              <span style={{ background: '#f3f4f6', color: '#374151', padding: '3px 8px', borderRadius: '6px' }}>
+                                {dayLogs.length} Records
+                              </span>
+                              <span style={{ background: '#ecfdf5', color: '#166534', padding: '3px 8px', borderRadius: '6px' }}>
+                                {dayPresent} Present
+                              </span>
+                              {dayAbsent > 0 && (
+                                <span style={{ background: '#fee2e2', color: '#991b1b', padding: '3px 8px', borderRadius: '6px' }}>
+                                  {dayAbsent} Absent
+                                </span>
+                              )}
+                              {dayLate > 0 && (
+                                <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 8px', borderRadius: '6px' }}>
+                                  {dayLate} Late
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedDate(dateKey);
+                                  setAttSubTab('markTable');
+                                }}
+                                style={{
+                                  background: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #bfdbfe',
+                                  cursor: 'pointer',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                Open Date Register &rarr;
+                              </button>
+                            </div>
                           </div>
-                          <div style={{ fontSize: '0.75rem', color: '#4b5563' }}>
-                            Status: <b>{att.status}</b> {att.checkInTime ? `| In: ${att.checkInTime}` : ''}
-                            {att.remarks ? ` | ${att.remarks}` : ''}
+
+                          {/* Day Logs Table */}
+                          <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '850px' }}>
+                              <thead style={{ background: '#fcfcfd', borderBottom: '1px solid #f3f4f6' }}>
+                                <tr>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>STAFF</th>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>ROLE / TRADE</th>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>STATUS</th>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>CHECK-IN / OUT</th>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>REMARKS / NOTES</th>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>RECORDED BY</th>
+                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700, textAlign: 'right' }}>STATUS / AUDIT</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dayLogs.map((log) => {
+                                  const conf = getStatusConfig(log.status);
+                                  return (
+                                    <tr key={log.id} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                      <td style={{ padding: '10px 16px' }}>
+                                        <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.88rem' }}>
+                                          {log.employee?.name || 'Staff Member'}
+                                        </div>
+                                        <span style={{ fontSize: '0.72rem', color: '#047857', background: '#ecfdf5', padding: '1px 5px', borderRadius: '3px', fontWeight: 700 }}>
+                                          {log.employee?.employeeId || `EMP-${log.employee?.id}`}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: '10px 16px', fontSize: '0.82rem', color: '#4b5563' }}>
+                                        {log.employee?.role || log.employee?.position || 'General'}
+                                      </td>
+                                      <td style={{ padding: '10px 16px' }}>
+                                        <span style={{
+                                          padding: '3px 8px',
+                                          borderRadius: '12px',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 700,
+                                          background: conf.bg,
+                                          color: conf.text,
+                                          border: `1px solid ${conf.border}`,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                        }}>
+                                          <span>{conf.icon}</span> {conf.label}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: '10px 16px', fontSize: '0.8rem', color: '#4b5563' }}>
+                                        {log.checkInTime ? `${log.checkInTime} - ${log.checkOutTime || '—'}` : '—'}
+                                      </td>
+                                      <td style={{ padding: '10px 16px', fontSize: '0.8rem', color: '#6b7280', maxWidth: '220px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={log.remarks}>
+                                        {log.remarks || '—'}
+                                      </td>
+                                      <td style={{ padding: '10px 16px', fontSize: '0.78rem', color: '#6b7280' }}>
+                                        {log.recordedBy || 'Manager'}
+                                      </td>
+                                      <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                                        <span style={{
+                                          fontSize: '0.75rem',
+                                          color: '#047857',
+                                          background: '#ecfdf5',
+                                          border: '1px solid #a7f3d0',
+                                          padding: '3px 10px',
+                                          borderRadius: '6px',
+                                          fontWeight: 700,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                        }}>
+                                          🔒 Finalized Log
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
-                        <button
-                          onClick={() => removeAttendance(att.id)}
-                          style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.9rem' }}
-                          title="Remove record"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
+            )}
+
           </div>
         )}
       </main>

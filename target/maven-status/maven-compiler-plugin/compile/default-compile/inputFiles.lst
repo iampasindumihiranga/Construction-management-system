@@ -8,6 +8,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\config\UserAccount
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\config\WebConfig.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\ConstructionManagementBackendApplication.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\AuthController.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\BankDetailsController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ClientController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ClientFeedbackController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ClientInquiryController.java
@@ -27,6 +28,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\exception\BadReque
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\exception\ConflictException.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\exception\GlobalExceptionHandler.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\exception\ResourceNotFoundException.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\BankDetails.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Client.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ClientFeedback.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ClientInquiry.java
@@ -47,6 +49,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectTask.
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\PurchaseOrder.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\StockAlert.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\UserAccount.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\BankDetailsRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientFeedbackRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientInquiryRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientNotificationRepository.java
@@ -68,6 +71,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\Purchas
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\StockAlertRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\UserAccountRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\AuthService.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\BankDetailsService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ClientFeedbackService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ClientInquiryService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ClientNotificationService.java

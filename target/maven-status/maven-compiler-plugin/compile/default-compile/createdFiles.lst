@@ -8,6 +8,7 @@ com\construction\enums\PropertyCategory.class
 com\construction\service\ClientService.class
 com\construction\model\MaterialRequest.class
 com\construction\ConstructionManagementBackendApplication.class
+com\construction\model\BankDetails.class
 com\construction\repository\MaterialRequestRepository.class
 com\construction\repository\ProjectTaskRepository.class
 com\construction\config\MaterialSchemaMigration.class
@@ -34,8 +35,10 @@ com\construction\model\ProjectExpense.class
 com\construction\repository\ProjectRepository.class
 com\construction\repository\UserAccountRepository.class
 com\construction\controller\ClientNotificationController.class
+com\construction\controller\BankDetailsController.class
 com\construction\service\ClientInquiryService.class
 com\construction\controller\ClientInquiryController.class
+com\construction\repository\BankDetailsRepository.class
 com\construction\model\DownPayment.class
 com\construction\repository\ClientNotificationRepository.class
 com\construction\service\ClientNotificationService.class
@@ -65,6 +68,7 @@ com\construction\controller\DownPaymentController.class
 com\construction\repository\DownPaymentRepository.class
 com\construction\service\AuthService.class
 com\construction\controller\ClientController.class
+com\construction\service\BankDetailsService.class
 com\construction\exception\ConflictException.class
 com\construction\repository\ProjectRequestRepository.class
 com\construction\controller\ContractController.class

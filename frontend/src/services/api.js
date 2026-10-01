@@ -270,6 +270,7 @@ export const getAttendanceRecords = (params = {}) => {
 export const getEmployeeAttendanceHistory = (id) => request(`/api/employees/${id}/attendance`);
 export const getAttendanceSummary = (date = '') => request(`/api/employees/attendance/summary${date ? `?date=${date}` : ''}`);
 export const deleteAttendanceRecord = (id) => request(`/api/employees/attendance/${id}`, { method: 'DELETE' });
+export const deleteAttendanceByQuery = (employeeId, date) => request(`/api/employees/attendance?employeeId=${employeeId}&date=${date}`, { method: 'DELETE' });
 
 // Employee Portal (Step 6)
 export const getMyAssignedProjects = (username) => request(`/api/employees/my-projects${username ? `?username=${encodeURIComponent(username)}` : ''}`);

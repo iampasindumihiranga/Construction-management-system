@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -437,9 +438,6 @@ public class EmployeeService {
         Employee employee = findById(employeeId);
         LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
         LocalDate date = input.getDate() != null ? input.getDate() : today;
-        if (date.isBefore(today)) {
-            throw new BadRequestException("Previous days are frozen. Attendance can only be marked for today onwards.");
-        }
 
         String rawStatus = input.getStatus() != null ? input.getStatus().trim().toUpperCase() : "PRESENT";
         if (!List.of("PRESENT", "ABSENT", "LATE", "ON_LEAVE", "HALF_DAY").contains(rawStatus)) {
@@ -449,9 +447,26 @@ public class EmployeeService {
         String checkIn = input.getCheckInTime() != null ? input.getCheckInTime().trim() : null;
         String checkOut = input.getCheckOutTime() != null ? input.getCheckOutTime().trim() : null;
 
-        if ("PRESENT".equalsIgnoreCase(rawStatus) || "LATE".equalsIgnoreCase(rawStatus)) {
+        if ("PRESENT".equalsIgnoreCase(rawStatus)) {
             if (checkIn == null || checkIn.isBlank()) {
-                throw new BadRequestException("Check-in time is required when marking status as " + rawStatus);
+                checkIn = "08:00";
+            }
+            if (checkOut == null || checkOut.isBlank()) {
+                checkOut = "17:00";
+            }
+        } else if ("LATE".equalsIgnoreCase(rawStatus)) {
+            if (checkIn == null || checkIn.isBlank()) {
+                checkIn = "09:30";
+            }
+            if (checkOut == null || checkOut.isBlank()) {
+                checkOut = "17:00";
+            }
+        } else if ("HALF_DAY".equalsIgnoreCase(rawStatus)) {
+            if (checkIn == null || checkIn.isBlank()) {
+                checkIn = "08:00";
+            }
+            if (checkOut == null || checkOut.isBlank()) {
+                checkOut = "12:00";
             }
         }
 
@@ -475,16 +490,16 @@ public class EmployeeService {
             }
         }
 
-        EmployeeAttendance attendance = attendanceRepository.findByEmployeeIdAndDate(employee.getId(), date)
-                .orElseGet(() -> {
-                    EmployeeAttendance newAtt = new EmployeeAttendance();
-                    newAtt.setEmployee(employee);
-                    newAtt.setDate(date);
-                    return newAtt;
-                });
+        Optional<EmployeeAttendance> existing = attendanceRepository.findByEmployeeIdAndDate(employee.getId(), date);
+        if (existing.isPresent()) {
+            throw new BadRequestException("Attendance for " + employee.getName() + " on " + date + " is already marked. Attendance can only be marked once and cannot be changed.");
+        }
 
+        EmployeeAttendance attendance = new EmployeeAttendance();
+        attendance.setEmployee(employee);
+        attendance.setDate(date);
         attendance.setStatus(rawStatus);
-        attendance.setRemarks(input.getRemarks());
+        attendance.setRemarks(input.getRemarks() != null ? input.getRemarks().trim() : "");
         if ("ABSENT".equalsIgnoreCase(rawStatus) || "ON_LEAVE".equalsIgnoreCase(rawStatus)) {
             attendance.setCheckInTime(null);
             attendance.setCheckOutTime(null);
@@ -507,6 +522,11 @@ public class EmployeeService {
 
     public void deleteAttendance(Long id) {
         attendanceRepository.deleteById(id);
+    }
+
+    public void deleteAttendanceByEmployeeAndDate(Long employeeId, LocalDate date) {
+        attendanceRepository.findByEmployeeIdAndDate(employeeId, date)
+                .ifPresent(attendanceRepository::delete);
     }
 
     public Map<String, Object> getAttendanceSummary(LocalDate date) {

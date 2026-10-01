@@ -80,6 +80,11 @@ export default function EmployeeDashboard() {
   const handleMarkAttendance = async (e) => {
     e.preventDefault();
     if (!profile?.id) return;
+    const existing = attendance.find((a) => a.date === attendanceForm.date);
+    if (existing) {
+      setAttendanceError(`Attendance for ${formatDate(attendanceForm.date)} is already marked as ${existing.status}. Attendance can only be marked once and cannot be changed.`);
+      return;
+    }
     setMarkingAttendance(true);
     setAttendanceNotice('');
     setAttendanceError('');
@@ -635,109 +640,128 @@ export default function EmployeeDashboard() {
                 Submit your daily check-in / check-out time and site notes. Your recorded attendance will be visible immediately to the Employee Manager.
               </p>
 
-              {attendanceNotice && (
-                <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0' }}>
-                  {attendanceNotice}
-                </div>
-              )}
-              {attendanceError && (
-                <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
-                  ⚠️ {attendanceError}
-                </div>
-              )}
+              {(() => {
+                const existingAtt = attendance.find((a) => a.date === attendanceForm.date);
+                const isMarked = !!existingAtt;
 
-              <form onSubmit={handleMarkAttendance} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                    Attendance Date
-                  </label>
-                  <input
-                    type="date"
-                    value={attendanceForm.date}
-                    onChange={(e) => setAttendanceForm({ ...attendanceForm, date: e.target.value })}
-                    required
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                  />
-                </div>
+                return (
+                  <>
+                    {isMarked && (
+                      <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0', fontSize: '0.88rem' }}>
+                        🔒 <b>Attendance for {formatDate(attendanceForm.date)} is already marked as {existingAtt.status}</b> {existingAtt.checkInTime ? `(In: ${existingAtt.checkInTime} | Out: ${existingAtt.checkOutTime || '—'})` : ''}. In attendance, records can only be marked once and cannot be changed after done.
+                      </div>
+                    )}
 
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                    Status
-                  </label>
-                  <select
-                    value={attendanceForm.status}
-                    onChange={(e) => setAttendanceForm({ ...attendanceForm, status: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                  >
-                    <option value="PRESENT">PRESENT (Full Day)</option>
-                    <option value="LATE">LATE (Delayed arrival)</option>
-                    <option value="HALF_DAY">HALF_DAY (4 Hours)</option>
-                    <option value="ON_LEAVE">ON_LEAVE (Approved leave)</option>
-                    <option value="ABSENT">ABSENT</option>
-                  </select>
-                </div>
+                    {attendanceNotice && (
+                      <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0' }}>
+                        {attendanceNotice}
+                      </div>
+                    )}
+                    {attendanceError && (
+                      <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
+                        ⚠️ {attendanceError}
+                      </div>
+                    )}
 
-                {attendanceForm.status !== 'ABSENT' && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                      Check-in Time
-                    </label>
-                    <input
-                      type="time"
-                      value={attendanceForm.checkInTime}
-                      onChange={(e) => setAttendanceForm({ ...attendanceForm, checkInTime: e.target.value })}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                    />
-                  </div>
-                )}
+                    <form onSubmit={handleMarkAttendance} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                          Attendance Date
+                        </label>
+                        <input
+                          type="date"
+                          value={attendanceForm.date}
+                          onChange={(e) => setAttendanceForm({ ...attendanceForm, date: e.target.value })}
+                          required
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                        />
+                      </div>
 
-                {attendanceForm.status !== 'ABSENT' && (
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                      Check-out Time
-                    </label>
-                    <input
-                      type="time"
-                      value={attendanceForm.checkOutTime}
-                      onChange={(e) => setAttendanceForm({ ...attendanceForm, checkOutTime: e.target.value })}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                    />
-                  </div>
-                )}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                          Status
+                        </label>
+                        <select
+                          value={isMarked ? existingAtt.status : attendanceForm.status}
+                          disabled={isMarked}
+                          onChange={(e) => setAttendanceForm({ ...attendanceForm, status: e.target.value })}
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
+                        >
+                          <option value="PRESENT">PRESENT (Full Day)</option>
+                          <option value="LATE">LATE (Delayed arrival)</option>
+                          <option value="HALF_DAY">HALF_DAY (4 Hours)</option>
+                          <option value="ON_LEAVE">ON_LEAVE (Approved leave)</option>
+                          <option value="ABSENT">ABSENT</option>
+                        </select>
+                      </div>
 
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                    Site Remarks / Notes
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="E.g. On-site at Residencies block B, structural inspection..."
-                    value={attendanceForm.remarks}
-                    onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                  />
-                </div>
+                      {(!isMarked || (existingAtt && existingAtt.status !== 'ABSENT')) && (
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                            Check-in Time
+                          </label>
+                          <input
+                            type="time"
+                            value={isMarked ? (existingAtt.checkInTime || '') : attendanceForm.checkInTime}
+                            disabled={isMarked}
+                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkInTime: e.target.value })}
+                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
+                          />
+                        </div>
+                      )}
 
-                <div>
-                  <button
-                    type="submit"
-                    disabled={markingAttendance}
-                    style={{
-                      width: '100%',
-                      padding: '10px 16px',
-                      background: '#047857',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '6px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                    }}
-                  >
-                    {markingAttendance ? 'Submitting...' : '✓ Submit Attendance'}
-                  </button>
-                </div>
-              </form>
+                      {(!isMarked || (existingAtt && existingAtt.status !== 'ABSENT')) && (
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                            Check-out Time
+                          </label>
+                          <input
+                            type="time"
+                            value={isMarked ? (existingAtt.checkOutTime || '') : attendanceForm.checkOutTime}
+                            disabled={isMarked}
+                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkOutTime: e.target.value })}
+                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
+                          />
+                        </div>
+                      )}
+
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                          Site Remarks / Notes
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="E.g. On-site at Residencies block B, structural inspection..."
+                          value={isMarked ? (existingAtt.remarks || '') : attendanceForm.remarks}
+                          disabled={isMarked}
+                          onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
+                        />
+                      </div>
+
+                      <div>
+                        <button
+                          type="submit"
+                          disabled={markingAttendance || isMarked}
+                          style={{
+                            width: '100%',
+                            padding: '10px 16px',
+                            background: isMarked ? '#9ca3af' : '#047857',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontWeight: 700,
+                            cursor: isMarked ? 'not-allowed' : 'pointer',
+                            fontSize: '0.9rem',
+                          }}
+                        >
+                          {isMarked ? '🔒 Marked & Finalized' : markingAttendance ? 'Submitting...' : '✓ Submit Attendance'}
+                        </button>
+                      </div>
+                    </form>
+                  </>
+                );
+              })()}
             </div>
 
             {/* Attendance History Table */}

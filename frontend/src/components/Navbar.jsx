@@ -78,9 +78,11 @@ export default function Navbar({ onSelectCategory }) {
             Contact Us
           </a>
 
-          <Link to="/feedbacks" className="nav-link-item">
-            Feedbacks
-          </Link>
+          {!isEmployee && !isEmployeeManager && (
+            <Link to="/feedbacks" className="nav-link-item">
+              Feedbacks
+            </Link>
+          )}
 
           {/* Quick Dashboard link if logged in */}
           {isClient && (
