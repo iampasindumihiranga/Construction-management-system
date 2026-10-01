@@ -8,17 +8,16 @@ import Footer from '../components/Footer';
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, login } = useAuth();
+  const { login, logout } = useAuth();
   const [form, setForm] = useState({ username: '', password: '' });
   const [portal, setPortal] = useState(() => location.state?.portal || 'client');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      navigate(ROLE_PATHS[user.role] ?? '/', { replace: true });
-    }
-  }, [navigate, user]);
+    // When logging to the system, default logout from all credentials
+    logout();
+  }, [logout]);
 
   const selectPortal = (nextPortal) => {
     setPortal(nextPortal);
@@ -158,7 +157,7 @@ export default function Login() {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} autoComplete="off">
             <div className="form-group">
               <label>
                 {getUsernameLabel()}
@@ -170,7 +169,7 @@ export default function Login() {
                 placeholder={getUsernamePlaceholder()}
                 required
                 className="light-input"
-                autoComplete="username"
+                autoComplete="off"
               />
             </div>
 
@@ -185,7 +184,7 @@ export default function Login() {
                 placeholder="Enter password"
                 required
                 className="light-input"
-                autoComplete="current-password"
+                autoComplete="new-password"
               />
             </div>
 

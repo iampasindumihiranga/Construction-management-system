@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { authLogin } from '../services/api';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import { authLogin, authLogout } from '../services/api';
 
 const STORAGE_KEY = 'odiliya-management-auth';
 
@@ -25,15 +25,44 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
+  const logout = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.token) {
+          authLogout(parsed.token).catch(() => {});
+        }
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
+    setUser(null);
+  }, []);
+
+  const login = useCallback(async (username, password, portal) => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
+    const response = await authLogin(username, password, portal);
+    setUser(response);
+    return response;
+  }, []);
+
   const value = useMemo(() => ({
     user,
-    login: async (username, password, portal) => {
-      const response = await authLogin(username, password, portal);
-      setUser(response);
-      return response;
-    },
-    logout: () => setUser(null),
-  }), [user]);
+    login,
+    logout,
+  }), [user, login, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -45,3 +74,4 @@ export function useAuth() {
   }
   return context;
 }
+

@@ -108,6 +108,10 @@ export const authLogin = (username, password, portal) => request('/api/auth/logi
   method: 'POST',
   body: { username, password, portal },
 });
+export const authLogout = (token) => request('/api/auth/logout', {
+  method: 'POST',
+  token,
+});
 
 // Client Management (US-CM-01, 02, 04, 05, 06, 07, 08, 25)
 export const registerClient = (client) => request('/api/clients/register', { method: 'POST', body: client });

@@ -761,7 +761,6 @@ export default function EmployeeManagerDashboard() {
                         <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>STATUS</th>
                         <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>TIME IN / OUT</th>
                         <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>REMARKS</th>
-                        <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem', textAlign: 'right' }}>STATUS / AUDIT</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -804,22 +803,6 @@ export default function EmployeeManagerDashboard() {
                             </td>
                             <td style={{ padding: '12px 14px', fontSize: '0.82rem', color: '#6b7280', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={log.remarks}>
                               {log.remarks || '—'}
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                              <span style={{
-                                fontSize: '0.75rem',
-                                color: '#047857',
-                                background: '#ecfdf5',
-                                border: '1px solid #a7f3d0',
-                                padding: '3px 9px',
-                                borderRadius: '6px',
-                                fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                              }}>
-                                🔒 Finalized Log
-                              </span>
                             </td>
                           </tr>
                         );
@@ -1729,22 +1712,7 @@ export default function EmployeeManagerDashboard() {
                                     <span>{statusConf.icon}</span> {statusConf.label}
                                   </span>
 
-                                  {record ? (
-                                    <span style={{
-                                      fontSize: '0.72rem',
-                                      color: '#047857',
-                                      background: '#ecfdf5',
-                                      border: '1px solid #a7f3d0',
-                                      padding: '2px 8px',
-                                      borderRadius: '4px',
-                                      fontWeight: 700,
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                    }}>
-                                      🔒 Marked &amp; Locked
-                                    </span>
-                                  ) : (
+                                  {!record && (
                                     <select
                                       value=""
                                       onChange={(e) => handleStatusChange(emp, e.target.value)}
@@ -1931,7 +1899,7 @@ export default function EmployeeManagerDashboard() {
                             const isMarked = attendanceList.some((a) => a.employee?.id === emp.id);
                             return (
                               <option key={emp.id} value={emp.id} disabled={isMarked}>
-                                {emp.name} ({emp.employeeId || `EMP-${emp.id}`}) - {emp.role} {isMarked ? '🔒 (Marked & Locked)' : ''}
+                                {emp.name} ({emp.employeeId || `EMP-${emp.id}`}) - {emp.role} {isMarked ? '(Marked)' : ''}
                               </option>
                             );
                           })}
@@ -2141,7 +2109,6 @@ export default function EmployeeManagerDashboard() {
                                   <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>CHECK-IN / OUT</th>
                                   <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>REMARKS / NOTES</th>
                                   <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700 }}>RECORDED BY</th>
-                                  <th style={{ padding: '10px 16px', color: '#6b7280', fontSize: '0.78rem', fontWeight: 700, textAlign: 'right' }}>STATUS / AUDIT</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -2184,22 +2151,6 @@ export default function EmployeeManagerDashboard() {
                                       </td>
                                       <td style={{ padding: '10px 16px', fontSize: '0.78rem', color: '#6b7280' }}>
                                         {log.recordedBy || 'Manager'}
-                                      </td>
-                                      <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                                        <span style={{
-                                          fontSize: '0.75rem',
-                                          color: '#047857',
-                                          background: '#ecfdf5',
-                                          border: '1px solid #a7f3d0',
-                                          padding: '3px 10px',
-                                          borderRadius: '6px',
-                                          fontWeight: 700,
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '4px',
-                                        }}>
-                                          🔒 Finalized Log
-                                        </span>
                                       </td>
                                     </tr>
                                   );

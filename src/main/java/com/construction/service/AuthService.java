@@ -186,9 +186,18 @@ public class AuthService {
 
     private AuthResponse createResponse(ManagementRole role, String username, String displayName,
                                         Long clientId, Long employeeId) {
+        if (username != null) {
+            sessions.entrySet().removeIf(entry -> entry.getValue() != null && username.equalsIgnoreCase(entry.getValue().username));
+        }
         String token = UUID.randomUUID().toString();
         sessions.put(token, new Session(role, username, Instant.now().plus(Duration.ofHours(8))));
         return new AuthResponse(token, role.name(), username, displayName, clientId, employeeId);
+    }
+
+    public void logout(String token) {
+        if (token != null && !token.isBlank()) {
+            sessions.remove(token.trim());
+        }
     }
 
     private String safePortal(String portal) {
