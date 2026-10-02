@@ -439,6 +439,12 @@ public class EmployeeService {
         LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
         LocalDate date = input.getDate() != null ? input.getDate() : today;
 
+        if (input.getRecordedBy() != null && input.getRecordedBy().startsWith("Self")) {
+            if (!date.equals(today)) {
+                throw new BadRequestException("Attendance can only be marked for today. Previous and upcoming days attendance cannot be marked.");
+            }
+        }
+
         String rawStatus = input.getStatus() != null ? input.getStatus().trim().toUpperCase() : "PRESENT";
         if (!List.of("PRESENT", "ABSENT", "LATE", "ON_LEAVE", "HALF_DAY").contains(rawStatus)) {
             throw new BadRequestException("Invalid attendance status: " + rawStatus + ". Valid statuses are PRESENT, ABSENT, LATE, ON_LEAVE, HALF_DAY.");
@@ -499,7 +505,11 @@ public class EmployeeService {
         attendance.setEmployee(employee);
         attendance.setDate(date);
         attendance.setStatus(rawStatus);
-        attendance.setRemarks(input.getRemarks() != null ? input.getRemarks().trim() : "");
+        String finalRemarks = input.getRemarks() != null ? input.getRemarks().trim() : "";
+        if ("PRESENT".equalsIgnoreCase(rawStatus)) {
+            finalRemarks = "Unavailable";
+        }
+        attendance.setRemarks(finalRemarks);
         if ("ABSENT".equalsIgnoreCase(rawStatus) || "ON_LEAVE".equalsIgnoreCase(rawStatus)) {
             attendance.setCheckInTime(null);
             attendance.setCheckOutTime(null);

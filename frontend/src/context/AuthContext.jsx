@@ -1,17 +1,34 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { authLogin, authLogout } from '../services/api';
 
-const STORAGE_KEY = 'odiliya-management-auth';
+const SESSION_KEY = 'odiliya-tab-auth';
+
+// Ensure no stale credentials remain in localStorage so no portal ever auto-logs in without credentials
+try {
+  localStorage.removeItem('odiliya-portal-sessions');
+  localStorage.removeItem('odiliya-management-auth');
+} catch {
+  // ignore
+}
 
 const AuthContext = createContext(null);
 
 function readStoredAuth() {
+  // Each browser tab strictly maintains its own isolated session in sessionStorage.
+  // A portal is NEVER logged in automatically without the user entering credentials.
+  // Refreshing a tab preserves that tab's own login so it refreshes to show latest updates.
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.role && parsed.username) {
+        return parsed;
+      }
+    }
   } catch {
-    return null;
+    // ignore
   }
+  return null;
 }
 
 export function AuthProvider({ children }) {
@@ -19,50 +36,67 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (user) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      } catch {
+        // ignore
+      }
     } else {
-      localStorage.removeItem(STORAGE_KEY);
+      try {
+        sessionStorage.removeItem(SESSION_KEY);
+      } catch {
+        // ignore
+      }
     }
   }, [user]);
 
   const logout = useCallback(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed?.token) {
-          authLogout(parsed.token).catch(() => {});
-        }
-      }
-    } catch {
-      // ignore
+    if (user?.token) {
+      authLogout(user.token).catch(() => {});
     }
     try {
-      localStorage.removeItem(STORAGE_KEY);
-      sessionStorage.clear();
+      sessionStorage.removeItem(SESSION_KEY);
     } catch {
       // ignore
     }
     setUser(null);
-  }, []);
+  }, [user]);
 
   const login = useCallback(async (username, password, portal) => {
+    // Authentication occurs ONLY upon providing valid credentials
+    const response = await authLogin(username, password, portal);
     try {
-      localStorage.removeItem(STORAGE_KEY);
-      sessionStorage.clear();
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(response));
     } catch {
       // ignore
     }
-    const response = await authLogin(username, password, portal);
     setUser(response);
     return response;
   }, []);
 
+  const updateUser = useCallback((updater) => {
+    setUser((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+      try {
+        if (next) {
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify(next));
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+        }
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
   const value = useMemo(() => ({
     user,
+    setUser,
+    updateUser,
     login,
     logout,
-  }), [user, login, logout]);
+  }), [user, login, logout, updateUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -74,4 +108,3 @@ export function useAuth() {
   }
   return context;
 }
-

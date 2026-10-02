@@ -11,10 +11,44 @@ import {
   getTasks,
   updateTaskProgress,
   recordAttendance,
+  updateEmployeeProfile,
 } from '../services/api';
 
+const ROLES_LIST = [
+  'Site Engineer',
+  'Civil Engineer',
+  'Project Architect',
+  'Electrician',
+  'Plumber',
+  'Mason / Bricklayer',
+  'Carpenter',
+  'HVAC Specialist',
+  'Safety Officer',
+  'Quality Inspector',
+  'Site Supervisor',
+  'General Staff',
+];
+
+const DEPARTMENTS = [
+  'Engineering',
+  'Electrical & Utilities',
+  'Plumbing & Sanitation',
+  'Architecture & Design',
+  'Structural Construction',
+  'Site Safety & Quality',
+  'Operations & Logistics',
+];
+
+const getTodayDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function EmployeeDashboard() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [profile, setProfile] = useState(null);
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -23,17 +57,34 @@ export default function EmployeeDashboard() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('projects');
 
-  // Self Attendance Form
+  const todayStr = getTodayDateString();
+
+  // Self Attendance Form (Restricted to Today only)
   const [attendanceForm, setAttendanceForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: todayStr,
     status: 'PRESENT',
     checkInTime: '08:00',
     checkOutTime: '17:00',
-    remarks: '',
+    remarks: 'Unavailable',
   });
   const [markingAttendance, setMarkingAttendance] = useState(false);
   const [attendanceNotice, setAttendanceNotice] = useState('');
   const [attendanceError, setAttendanceError] = useState('');
+
+  // Profile Edit State
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    role: '',
+    department: '',
+    phone: '',
+    email: '',
+    qualifications: '',
+    address: '',
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileNotice, setProfileNotice] = useState('');
+  const [profileError, setProfileError] = useState('');
 
   // Task Progress Editing
   const [updatingTaskId, setUpdatingTaskId] = useState(null);
@@ -80,27 +131,36 @@ export default function EmployeeDashboard() {
   const handleMarkAttendance = async (e) => {
     e.preventDefault();
     if (!profile?.id) return;
-    const existing = attendance.find((a) => a.date === attendanceForm.date);
+
+    const currentToday = getTodayDateString();
+    if (attendanceForm.date !== currentToday) {
+      setAttendanceError('Attendance can only be marked for today. Previous and upcoming days attendance cannot be marked.');
+      return;
+    }
+
+    const existing = attendance.find((a) => a.date === currentToday);
     if (existing) {
-      setAttendanceError(`Attendance for ${formatDate(attendanceForm.date)} is already marked as ${existing.status}. Attendance can only be marked once and cannot be changed.`);
+      setAttendanceError(`Attendance for today (${formatDate(currentToday)}) is already marked as ${existing.status}. Attendance can only be marked once and cannot be changed.`);
       return;
     }
     setMarkingAttendance(true);
     setAttendanceNotice('');
     setAttendanceError('');
 
+    const finalRemarks = attendanceForm.status === 'PRESENT' ? 'Unavailable' : (attendanceForm.remarks.trim() || 'Recorded from Employee Portal');
+
     try {
       await recordAttendance({
         employeeId: profile.id,
-        date: attendanceForm.date,
+        date: currentToday,
         status: attendanceForm.status,
         checkInTime: attendanceForm.status === 'ABSENT' ? null : attendanceForm.checkInTime,
         checkOutTime: attendanceForm.status === 'ABSENT' ? null : attendanceForm.checkOutTime,
-        remarks: attendanceForm.remarks.trim() || 'Self-marked attendance from Employee Portal',
+        remarks: finalRemarks,
         recordedBy: `Self (${profile.name || user?.username})`,
       });
 
-      setAttendanceNotice(`✓ Attendance for ${attendanceForm.date} successfully recorded!`);
+      setAttendanceNotice(`✓ Attendance for today (${currentToday}) successfully recorded!`);
       const updatedAtt = await getEmployeeAttendanceHistory(profile.id);
       setAttendance(updatedAtt || []);
       setTimeout(() => setAttendanceNotice(''), 4000);
@@ -108,6 +168,91 @@ export default function EmployeeDashboard() {
       setAttendanceError(err.message || 'Failed to record attendance.');
     } finally {
       setMarkingAttendance(false);
+    }
+  };
+
+  const startEditProfile = () => {
+    if (!profile) return;
+    setProfileForm({
+      name: profile.name || user?.displayName || '',
+      role: profile.role || profile.position || 'Site Engineer',
+      department: profile.department || 'Engineering',
+      phone: profile.phone || '',
+      email: profile.email || user?.username || '',
+      qualifications: profile.qualifications || '',
+      address: profile.address || '',
+    });
+    setProfileNotice('');
+    setProfileError('');
+    setIsEditingProfile(true);
+  };
+
+  const cancelEditProfile = () => {
+    setIsEditingProfile(false);
+    setProfileNotice('');
+    setProfileError('');
+  };
+
+  const handleSaveProfile = async (e) => {
+    if (e) e.preventDefault();
+    if (!profile?.id) return;
+
+    if (!profileForm.name.trim() || profileForm.name.trim().length < 2) {
+      setProfileError('Full name is required and must be at least 2 characters.');
+      return;
+    }
+    if (!profileForm.email.trim()) {
+      setProfileError('Email address is required.');
+      return;
+    }
+    if (!profileForm.phone.trim()) {
+      setProfileError('Contact phone number is required.');
+      return;
+    }
+    if (!profileForm.role.trim()) {
+      setProfileError('Role / Trade is required.');
+      return;
+    }
+    if (!profileForm.department.trim()) {
+      setProfileError('Department is required.');
+      return;
+    }
+
+    setSavingProfile(true);
+    setProfileNotice('');
+    setProfileError('');
+
+    try {
+      const payload = {
+        ...profile,
+        id: profile.id,
+        employeeId: profile.employeeId,
+        name: profileForm.name.trim(),
+        role: profileForm.role.trim(),
+        position: profileForm.role.trim(),
+        department: profileForm.department.trim(),
+        phone: profileForm.phone.trim(),
+        email: profileForm.email.trim(),
+        qualifications: profileForm.qualifications.trim(),
+        address: profileForm.address.trim(),
+      };
+
+      const updated = await updateEmployeeProfile(profile.id, payload);
+      setProfile(updated);
+      if (updateUser) {
+        updateUser((prev) => ({
+          ...prev,
+          displayName: updated.name,
+          username: prev?.username === profile.email ? updated.email : prev?.username,
+        }));
+      }
+      setProfileNotice('✓ Profile updated and saved successfully!');
+      setIsEditingProfile(false);
+      setTimeout(() => setProfileNotice(''), 4000);
+    } catch (err) {
+      setProfileError(err.message || 'Failed to update profile.');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -666,15 +811,21 @@ export default function EmployeeDashboard() {
                     <form onSubmit={handleMarkAttendance} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
                       <div>
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                          Attendance Date
+                          Attendance Date <span style={{ fontSize: '0.75rem', color: '#047857', fontWeight: 700 }}>(Today Only)</span>
                         </label>
                         <input
                           type="date"
-                          value={attendanceForm.date}
-                          onChange={(e) => setAttendanceForm({ ...attendanceForm, date: e.target.value })}
-                          required
-                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                          value={todayStr}
+                          readOnly
+                          disabled
+                          min={todayStr}
+                          max={todayStr}
+                          title="Attendance can only be marked for today. Previous and upcoming dates cannot be marked."
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#f3f4f6', cursor: 'not-allowed', color: '#374151', fontWeight: 600 }}
                         />
+                        <span style={{ fontSize: '0.7rem', color: '#6b7280', display: 'block', marginTop: '2px' }}>
+                          🔒 Only today's attendance can be marked
+                        </span>
                       </div>
 
                       <div>
@@ -684,7 +835,14 @@ export default function EmployeeDashboard() {
                         <select
                           value={isMarked ? existingAtt.status : attendanceForm.status}
                           disabled={isMarked}
-                          onChange={(e) => setAttendanceForm({ ...attendanceForm, status: e.target.value })}
+                          onChange={(e) => {
+                            const newStatus = e.target.value;
+                            setAttendanceForm((prev) => ({
+                              ...prev,
+                              status: newStatus,
+                              remarks: newStatus === 'PRESENT' ? 'Unavailable' : (prev.remarks === 'Unavailable' ? '' : prev.remarks),
+                            }));
+                          }}
                           style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
                         >
                           <option value="PRESENT">PRESENT (Full Day)</option>
@@ -728,15 +886,34 @@ export default function EmployeeDashboard() {
                       <div style={{ gridColumn: 'span 2' }}>
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
                           Site Remarks / Notes
+                          {(isMarked ? existingAtt.status === 'PRESENT' : attendanceForm.status === 'PRESENT') && (
+                            <span style={{ marginLeft: '6px', fontSize: '0.72rem', color: '#6b7280', fontWeight: 500 }}>
+                              (Unavailable for Full Day Present)
+                            </span>
+                          )}
                         </label>
                         <input
                           type="text"
-                          placeholder="E.g. On-site at Residencies block B, structural inspection..."
-                          value={isMarked ? (existingAtt.remarks || '') : attendanceForm.remarks}
-                          disabled={isMarked}
+                          placeholder={(isMarked ? existingAtt.status === 'PRESENT' : attendanceForm.status === 'PRESENT') ? 'Unavailable' : 'E.g. On-site notes, inspection notes, delay reasons...'}
+                          value={isMarked ? (existingAtt.status === 'PRESENT' ? 'Unavailable' : (existingAtt.remarks || '')) : (attendanceForm.status === 'PRESENT' ? 'Unavailable' : attendanceForm.remarks)}
+                          disabled={isMarked || attendanceForm.status === 'PRESENT'}
                           onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
-                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid #d1d5db',
+                            background: (isMarked || attendanceForm.status === 'PRESENT') ? '#f3f4f6' : '#fff',
+                            color: (isMarked || attendanceForm.status === 'PRESENT') ? '#6b7280' : '#111827',
+                            cursor: (isMarked || attendanceForm.status === 'PRESENT') ? 'not-allowed' : 'default',
+                            fontStyle: (isMarked ? existingAtt.status === 'PRESENT' : attendanceForm.status === 'PRESENT') ? 'italic' : 'normal',
+                          }}
                         />
+                        {attendanceForm.status === 'PRESENT' && !isMarked && (
+                          <span style={{ fontSize: '0.72rem', color: '#6b7280', display: 'block', marginTop: '3px' }}>
+                            ℹ️ Site remarks are unavailable when marked PRESENT (Full Day).
+                          </span>
+                        )}
                       </div>
 
                       <div>
@@ -845,8 +1022,14 @@ export default function EmployeeDashboard() {
                           <td style={{ padding: '12px 16px', fontSize: '0.85rem', color: '#4b5563' }}>
                             {att.checkOutTime || '-'}
                           </td>
-                          <td style={{ padding: '12px 16px', fontSize: '0.85rem', color: '#374151' }}>
-                            {att.remarks || '-'}
+                          <td style={{ padding: '12px 16px', fontSize: '0.85rem' }}>
+                            {att.status === 'PRESENT' ? (
+                              <span style={{ color: '#6b7280', fontStyle: 'italic', background: '#f3f4f6', padding: '3px 8px', borderRadius: '4px', fontSize: '0.8rem', display: 'inline-block' }}>
+                                Unavailable
+                              </span>
+                            ) : (
+                              att.remarks || '-'
+                            )}
                           </td>
                           <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: '#6b7280' }}>
                             {att.recordedBy || 'Employee Manager'}
@@ -864,83 +1047,312 @@ export default function EmployeeDashboard() {
         {/* TAB 4: MY PROFILE */}
         {activeTab === 'profile' && (
           <div style={{ maxWidth: '800px', margin: '0 auto', background: '#ffffff', borderRadius: '12px', padding: '28px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-            <h3 style={{ margin: '0 0 16px', color: '#111827', fontSize: '1.3rem' }}>
-              👤 Employee Identification &amp; Qualifications
-            </h3>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Employee ID
-                </label>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#047857', marginTop: '2px' }}>
-                  {profile?.employeeId || 'EMP001'}
-                </div>
+                <h3 style={{ margin: 0, color: '#111827', fontSize: '1.3rem' }}>
+                  👤 Employee Identification &amp; Qualifications
+                </h3>
+                <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                  View and update your personal, role, and qualifications profile details.
+                </p>
               </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Full Name
-                </label>
-                <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#111827', marginTop: '2px' }}>
-                  {profile?.name || user?.displayName || '-'}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Role / Trade
-                </label>
-                <div style={{ fontSize: '1rem', fontWeight: 600, color: '#111827', marginTop: '2px' }}>
-                  {profile?.role || profile?.position || '-'}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Department
-                </label>
-                <div style={{ fontSize: '1rem', color: '#374151', marginTop: '2px' }}>
-                  {profile?.department || 'Operations'}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Phone / Contact
-                </label>
-                <div style={{ fontSize: '1rem', color: '#374151', marginTop: '2px' }}>
-                  {profile?.phone || 'Not specified'}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Email Address
-                </label>
-                <div style={{ fontSize: '1rem', color: '#374151', marginTop: '2px' }}>
-                  {profile?.email || user?.username || '-'}
-                </div>
-              </div>
-
-              <div style={{ gridColumn: 'span 2' }}>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Qualifications &amp; Certifications
-                </label>
-                <div style={{ fontSize: '0.95rem', color: '#1f2937', marginTop: '4px', background: '#f9fafb', padding: '12px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-                  {profile?.qualifications || 'No qualifications specified yet.'}
-                </div>
-              </div>
-
-              <div style={{ gridColumn: 'span 2' }}>
-                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
-                  Residential Address
-                </label>
-                <div style={{ fontSize: '0.95rem', color: '#374151', marginTop: '2px' }}>
-                  {profile?.address || 'Not specified'}
-                </div>
-              </div>
+              {!isEditingProfile && (
+                <button
+                  type="button"
+                  onClick={startEditProfile}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: '#047857',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '9px 18px',
+                    fontWeight: 600,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(4, 120, 87, 0.2)',
+                  }}
+                >
+                  ✏️ Edit Profile
+                </button>
+              )}
             </div>
+
+            {profileNotice && (
+              <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0', fontSize: '0.9rem' }}>
+                {profileNotice}
+              </div>
+            )}
+            {profileError && (
+              <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca', fontSize: '0.9rem' }}>
+                ⚠️ {profileError}
+              </div>
+            )}
+
+            {!isEditingProfile ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Employee ID
+                    </label>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#047857', marginTop: '2px' }}>
+                      {profile?.employeeId || 'EMP001'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Full Name
+                    </label>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#111827', marginTop: '2px' }}>
+                      {profile?.name || user?.displayName || '-'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Role / Trade
+                    </label>
+                    <div style={{ fontSize: '1rem', fontWeight: 600, color: '#111827', marginTop: '2px' }}>
+                      {profile?.role || profile?.position || '-'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Department
+                    </label>
+                    <div style={{ fontSize: '1rem', color: '#374151', marginTop: '2px' }}>
+                      {profile?.department || 'Operations'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Phone / Contact
+                    </label>
+                    <div style={{ fontSize: '1rem', color: '#374151', marginTop: '2px' }}>
+                      {profile?.phone || 'Not specified'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Email Address
+                    </label>
+                    <div style={{ fontSize: '1rem', color: '#374151', marginTop: '2px' }}>
+                      {profile?.email || user?.username || '-'}
+                    </div>
+                  </div>
+
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Qualifications &amp; Certifications
+                    </label>
+                    <div style={{ fontSize: '0.95rem', color: '#1f2937', marginTop: '4px', background: '#f9fafb', padding: '12px', borderRadius: '8px', border: '1px solid #e5e7eb', whiteSpace: 'pre-wrap' }}>
+                      {profile?.qualifications || 'No qualifications specified yet.'}
+                    </div>
+                  </div>
+
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700 }}>
+                      Residential Address
+                    </label>
+                    <div style={{ fontSize: '0.95rem', color: '#374151', marginTop: '2px', whiteSpace: 'pre-wrap' }}>
+                      {profile?.address || 'Not specified'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '24px', borderTop: '1px solid #f3f4f6', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={startEditProfile}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '10px 20px',
+                      fontWeight: 600,
+                      fontSize: '0.9rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✏️ Edit Profile Information
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form onSubmit={handleSaveProfile}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Employee ID <span style={{ fontSize: '0.7rem', color: '#6b7280', fontWeight: 500 }}>(System Assigned)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={profile?.employeeId || 'EMP001'}
+                      disabled
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#f3f4f6', color: '#047857', fontWeight: 700, cursor: 'not-allowed', fontSize: '1rem' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={profileForm.name}
+                      onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                      required
+                      placeholder="Enter your full name"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Role / Trade *
+                    </label>
+                    <select
+                      value={profileForm.role}
+                      onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem', background: '#fff' }}
+                    >
+                      {profileForm.role && !ROLES_LIST.includes(profileForm.role) && (
+                        <option value={profileForm.role}>{profileForm.role}</option>
+                      )}
+                      {ROLES_LIST.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Department *
+                    </label>
+                    <select
+                      value={profileForm.department}
+                      onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem', background: '#fff' }}
+                    >
+                      {profileForm.department && !DEPARTMENTS.includes(profileForm.department) && (
+                        <option value={profileForm.department}>{profileForm.department}</option>
+                      )}
+                      {DEPARTMENTS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Phone / Contact *
+                    </label>
+                    <input
+                      type="text"
+                      value={profileForm.phone}
+                      onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                      required
+                      placeholder="+94 77 123 4567"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Email Address *
+                    </label>
+                    <input
+                      type="email"
+                      value={profileForm.email}
+                      onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                      required
+                      placeholder="employee@odiliya.com"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem' }}
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Qualifications &amp; Certifications
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={profileForm.qualifications}
+                      onChange={(e) => setProfileForm({ ...profileForm, qualifications: e.target.value })}
+                      placeholder="E.g. B.Sc. in Engineering, NVQ Level 4, safety certificates..."
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem', fontFamily: 'inherit', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      Residential Address
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={profileForm.address}
+                      onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
+                      placeholder="E.g. No. 45, Galle Road, Colombo 03"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.95rem', fontFamily: 'inherit', resize: 'vertical' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
+                  <button
+                    type="button"
+                    onClick={cancelEditProfile}
+                    disabled={savingProfile}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      border: '1px solid #d1d5db',
+                      background: '#f3f4f6',
+                      color: '#374151',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    style={{
+                      padding: '10px 24px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: '#047857',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      cursor: savingProfile ? 'not-allowed' : 'pointer',
+                      fontSize: '0.9rem',
+                      boxShadow: '0 2px 4px rgba(4, 120, 87, 0.25)',
+                    }}
+                  >
+                    {savingProfile ? 'Saving Profile...' : '💾 Save Profile'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
       </main>

@@ -71,8 +71,10 @@ public class DownPaymentService {
         // Automatically set downpayment validity to 60 days from payment date
         payment.setValidUntil(payment.getPaymentDate().plusDays(60));
 
-        // Automatically calculate status: Valid, Expiring Soon, or Expired
-        payment.setStatus(payment.calculateStatus());
+        // Preserve provided status (e.g. "Pending" for bank transfer verification), otherwise calculate
+        if (payment.getStatus() == null || payment.getStatus().isBlank()) {
+            payment.setStatus(payment.calculateStatus());
+        }
 
         // Auto-generate reference number if blank
         if (payment.getReferenceNumber() == null || payment.getReferenceNumber().isBlank()) {

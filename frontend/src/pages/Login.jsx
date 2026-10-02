@@ -14,11 +14,6 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    // When logging to the system, default logout from all credentials
-    logout();
-  }, [logout]);
-
   const selectPortal = (nextPortal) => {
     setPortal(nextPortal);
     setForm({ username: '', password: '' });

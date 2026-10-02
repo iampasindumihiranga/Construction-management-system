@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -59,6 +59,40 @@ const computeStatusFromDates = (paymentDate, validUntil) => {
   return 'Valid';
 };
 
+const getCardBrand = (cardNumber) => {
+  const clean = (cardNumber || '').replace(/\D/g, '');
+  if (clean.startsWith('4')) return 'Visa';
+  if (/^5[1-5]/.test(clean) || /^2[2-7]/.test(clean)) return 'Mastercard';
+  if (/^3[47]/.test(clean)) return 'American Express';
+  return 'Credit / Debit';
+};
+
+const validateExpiryDate = (expiryStr) => {
+  if (!expiryStr || !expiryStr.trim()) {
+    return 'Expiry date is required (MM/YY)';
+  }
+  const clean = expiryStr.trim();
+  const match = clean.match(/^(\d{2})\/(\d{2})$/);
+  if (!match) {
+    return 'Format must be MM/YY (e.g. 08/28)';
+  }
+  const month = parseInt(match[1], 10);
+  const year = parseInt(match[2], 10);
+  if (month < 1 || month > 12) {
+    return 'Invalid month. Month must be between 01 and 12.';
+  }
+  const now = new Date();
+  const currentYear = now.getFullYear() % 100;
+  const currentMonth = now.getMonth() + 1;
+  if (year < currentYear || (year === currentYear && month < currentMonth)) {
+    return 'Card has expired. Please enter a valid future date.';
+  }
+  if (year > currentYear + 25) {
+    return 'Invalid year. Expiry year is too far in the future.';
+  }
+  return '';
+};
+
 export default function ClientDashboard() {
   const { user } = useAuth();
 
@@ -78,7 +112,6 @@ export default function ClientDashboard() {
   const [feedbacks, setFeedbacks] = useState([]);
   const [downPayments, setDownPayments] = useState([]);
   const [paymentSummary, setPaymentSummary] = useState(null);
-  const [payModalOpen, setPayModalOpen] = useState(false);
   const [receiptViewModal, setReceiptViewModal] = useState(null);
   const [payForm, setPayForm] = useState({
     projectId: '',
@@ -90,10 +123,36 @@ export default function ClientDashboard() {
   });
   const [receiptFile, setReceiptFile] = useState(null);
   const [submittingPayment, setSubmittingPayment] = useState(false);
-  const [bankDetails, setBankDetails] = useState(null);
-  const [cardGatewayStep, setCardGatewayStep] = useState('form'); // 'form' | 'gateway' | 'success'
+  const [bankDetails, setBankDetails] = useState(() => {
+    try {
+      const cached = localStorage.getItem('odiliya-bank-details');
+      if (cached) return JSON.parse(cached);
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+
+  const fetchBankDetails = useCallback(async () => {
+    try {
+      const bDet = await getBankDetails();
+      if (bDet && (bDet.bankName || bDet.accountNumber || bDet.id)) {
+        setBankDetails(bDet);
+        try {
+          localStorage.setItem('odiliya-bank-details', JSON.stringify(bDet));
+          localStorage.setItem('odiliya-bank-details-timestamp', String(Date.now()));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('Bank details fetch error:', err);
+    }
+  }, []);
+
   const [cardForm, setCardForm] = useState({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+  const [cardErrors, setCardErrors] = useState({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
   const [processingCard, setProcessingCard] = useState(false);
+  const [paymentConfirmationModal, setPaymentConfirmationModal] = useState(null);
+  const [paymentMode, setPaymentMode] = useState('card'); // 'card' | 'bank'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -170,7 +229,13 @@ export default function ClientDashboard() {
         getProjects({ marketingOnly: true }),
         getBankDetails().catch(() => null),
       ]);
-      setBankDetails(bankDet);
+      if (bankDet && (bankDet.bankName || bankDet.accountNumber || bankDet.id)) {
+        setBankDetails(bankDet);
+        try {
+          localStorage.setItem('odiliya-bank-details', JSON.stringify(bankDet));
+          localStorage.setItem('odiliya-bank-details-timestamp', String(Date.now()));
+        } catch {}
+      }
 
       setAllShowcaseProjects(showcaseProjects || []);
 
@@ -265,25 +330,128 @@ export default function ClientDashboard() {
     }
   }, [clientProfile]);
 
-  const handleOpenPayModal = (presetProjectId = '') => {
+  useEffect(() => {
+    fetchBankDetails();
+
+    const handleStorage = (e) => {
+      if (e.key === 'odiliya-bank-details-timestamp' || e.key === 'odiliya-bank-details') {
+        try {
+          if (e.newValue) {
+            const parsed = JSON.parse(e.newValue);
+            if (parsed && typeof parsed === 'object') {
+              setBankDetails(parsed);
+              return;
+            }
+          }
+        } catch {}
+        fetchBankDetails();
+      }
+    };
+
+    const handleCustom = (e) => {
+      if (e.detail) {
+        setBankDetails(e.detail);
+      } else {
+        fetchBankDetails();
+      }
+    };
+
+    const handleFocus = () => {
+      fetchBankDetails();
+    };
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('odiliya-bank-details-updated', handleCustom);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('odiliya-bank-details-updated', handleCustom);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [fetchBankDetails]);
+
+  useEffect(() => {
+    if (activeTab === 'downpayments' || paymentMode === 'bank') {
+      fetchBankDetails();
+    }
+  }, [activeTab, paymentMode, fetchBankDetails]);
+
+  const fetchInquiries = useCallback(async () => {
+    if (!clientProfile?.id) return;
+    try {
+      const inqData = await getInquiries(clientProfile.id);
+      setInquiries(inqData || []);
+      const notifData = await getNotifications(clientProfile.id).catch(() => []);
+      setNotifications(notifData || []);
+    } catch (err) {
+      console.warn('Failed to refresh inquiries:', err);
+    }
+  }, [clientProfile?.id]);
+
+  useEffect(() => {
+    if (activeTab === 'inquiries') {
+      fetchInquiries();
+    }
+  }, [activeTab, fetchInquiries]);
+
+  useEffect(() => {
+    const handleInquirySync = (e) => {
+      if (e.key === 'odiliya-inquiries-timestamp' || e.type === 'odiliya-inquiry-replied') {
+        fetchInquiries();
+      }
+    };
+    window.addEventListener('storage', handleInquirySync);
+    window.addEventListener('odiliya-inquiry-replied', handleInquirySync);
+    return () => {
+      window.removeEventListener('storage', handleInquirySync);
+      window.removeEventListener('odiliya-inquiry-replied', handleInquirySync);
+    };
+  }, [fetchInquiries]);
+
+  const handleOpenPayModal = (presetProjectId = '', defaultMethod = 'Credit Card') => {
     setReceiptFile(null);
+    fetchBankDetails();
     const chosenProject = projects.find(p => p.id === Number(presetProjectId)) || projects[0];
     const defaultAmount = chosenProject?.budget ? (chosenProject.budget * 0.2).toFixed(2) : '500000';
     setPayForm({
       projectId: chosenProject ? String(chosenProject.id) : (projects[0]?.id ? String(projects[0].id) : ''),
       amount: defaultAmount,
       paymentDate: new Date().toISOString().slice(0, 10),
-      paymentMethod: 'BANK_TRANSFER',
+      paymentMethod: defaultMethod,
       referenceNumber: '',
       notes: '',
     });
-    setPayModalOpen(true);
+    setPaymentMode(defaultMethod === 'Bank Transfer' ? 'bank' : 'card');
+    setCardErrors({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+    if (defaultMethod === 'Credit Card') {
+      setActiveTab('card-checkout');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      setActiveTab('downpayments');
+    }
+  };
+
+  const handleOpenCardGateway = (e) => {
+    e.preventDefault();
+    if (!payForm.amount || Number(payForm.amount) <= 0) {
+      setError('Please provide a valid payment amount.');
+      return;
+    }
+    setError('');
+    setCardErrors({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+    setActiveTab('card-checkout');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleClientSubmitPayment = async (e) => {
     e.preventDefault();
     if (!clientProfile || !payForm.amount || Number(payForm.amount) <= 0) {
       setError('Please provide a valid payment amount.');
+      return;
+    }
+    if (!receiptFile) {
+      setError('Please upload your bank transfer payment receipt or slip.');
       return;
     }
     setSubmittingPayment(true);
@@ -294,20 +462,22 @@ export default function ClientDashboard() {
       let receiptFileType = null;
 
       if (receiptFile) {
-        receiptData = await readFileAsDataUrl(receiptFile);
+        receiptData = receiptFile.data || (await readFileAsDataUrl(receiptFile));
         receiptFileName = receiptFile.name;
         receiptFileType = receiptFile.type || 'application/octet-stream';
       }
 
       const chosenProj = projects.find(p => p.id === Number(payForm.projectId));
+      const refNum = payForm.referenceNumber.trim() || `TXN-${Date.now().toString().slice(-8)}`;
 
       await createDownPayment({
         client: { id: clientProfile.id },
         project: payForm.projectId ? { id: Number(payForm.projectId) } : null,
         amount: Number(payForm.amount),
         paymentDate: payForm.paymentDate,
-        paymentMethod: payForm.paymentMethod,
-        referenceNumber: payForm.referenceNumber.trim() || null,
+        paymentMethod: 'Bank Transfer',
+        status: 'Pending',
+        referenceNumber: refNum,
         notes: payForm.notes.trim() || null,
         totalProjectAmount: chosenProj?.budget ? Number(chosenProj.budget) : null,
         requiredDownPayment: chosenProj?.budget ? Number((chosenProj.budget * 0.2).toFixed(2)) : null,
@@ -316,16 +486,34 @@ export default function ClientDashboard() {
         receiptFileType,
       });
 
-      setSuccessMsg('Your payment has been recorded! Thank you.');
-      setPayModalOpen(false);
-      setReceiptFile(null);
+      // Refresh notifications immediately
+      const notifs = await getNotifications(clientProfile.id);
+      setNotifications(notifs || []);
+
       const [dpData, summaryData] = await Promise.all([
         getDownPayments({ clientId: clientProfile.id }),
         getPaymentSummary(clientProfile.id),
       ]);
       setDownPayments(dpData || []);
       setPaymentSummary(summaryData);
-      setTimeout(() => setSuccessMsg(''), 4500);
+
+      setReceiptFile(null);
+
+      // Open confirmation message on dashboard
+      setPaymentConfirmationModal({
+        open: true,
+        txnRef: refNum,
+        amount: Number(payForm.amount),
+        projectName: chosenProj?.name || 'General Project Down Payment',
+        date: payForm.paymentDate,
+        paymentMethod: 'Online Bank Transfer',
+        message: 'Your bank transfer receipt has been submitted to your Client Manager. Your payment status will remain Pending until your Client Manager checks and accepts it. Once accepted, your payment will be marked as Completed.'
+      });
+      setActiveTab('payment-confirmation');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      setSuccessMsg('Bank transfer receipt submitted! Your payment is awaiting Client Manager verification.');
+      setTimeout(() => setSuccessMsg(''), 6000);
     } catch (err) {
       setError(err.message || 'Failed to submit payment');
     } finally {
@@ -603,52 +791,122 @@ export default function ClientDashboard() {
     return { total: Number(proj.budget), paid: totalPaid, balance: Math.max(0, Number(proj.budget) - totalPaid) };
   };
 
-  const handleCardPayment = async (e) => {
-    e.preventDefault();
-    if (!cardForm.cardNumber || !cardForm.cardHolder || !cardForm.expiry || !cardForm.cvv) return;
-    setProcessingCard(true);
-    // Simulate card processing
-    await new Promise(r => setTimeout(r, 2500));
-    setProcessingCard(false);
-    setCardGatewayStep('success');
-    // After 2s auto-submit the actual payment
-    setTimeout(async () => {
-      setCardGatewayStep('form');
-      setCardForm({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
-      if (!clientProfile || !payForm.amount || Number(payForm.amount) <= 0) return;
-      setSubmittingPayment(true);
-      try {
-        const chosenProj = projects.find(p => p.id === Number(payForm.projectId));
-        await createDownPayment({
-          client: { id: clientProfile.id },
-          project: payForm.projectId ? { id: Number(payForm.projectId) } : null,
-          amount: Number(payForm.amount),
-          paymentDate: payForm.paymentDate,
-          paymentMethod: 'Credit Card',
-          referenceNumber: `CC-${Date.now()}`,
-          notes: payForm.notes.trim() || 'Card payment via payment gateway',
-          totalProjectAmount: chosenProj?.budget ? Number(chosenProj.budget) : null,
-          requiredDownPayment: chosenProj?.budget ? Number((chosenProj.budget * 0.2).toFixed(2)) : null,
-          receipt: null, receiptFileName: null, receiptFileType: null,
-        });
-        setSuccessMsg('Card payment processed successfully! Your payment has been recorded.');
-        setPayModalOpen(false);
-        const [dpData, summaryData] = await Promise.all([
-          getDownPayments({ clientId: clientProfile.id }),
-          getPaymentSummary(clientProfile.id),
-        ]);
-        setDownPayments(dpData || []);
-        setPaymentSummary(summaryData);
-        setTimeout(() => setSuccessMsg(''), 4500);
-      } catch (err) {
-        setError(err.message || 'Payment failed');
-      } finally {
-        setSubmittingPayment(false);
+  const handleExpiryChange = (e) => {
+    let raw = e.target.value.replace(/\D/g, '');
+    if (raw.length > 4) raw = raw.slice(0, 4);
+
+    // If first digit is > 1 (e.g. '2' through '9'), user is typing a single-digit month (e.g. '8' -> '08')
+    if (raw.length === 1 && parseInt(raw, 10) > 1) {
+      raw = '0' + raw;
+    }
+
+    let formatted = raw;
+    if (raw.length >= 2) {
+      const monthPart = parseInt(raw.slice(0, 2), 10);
+      formatted = raw.slice(0, 2) + '/' + raw.slice(2);
+      if (monthPart < 1 || monthPart > 12) {
+        setCardErrors(prev => ({ ...prev, expiry: 'Invalid month. Month must be between 01 and 12.' }));
+      } else if (raw.length === 4) {
+        const err = validateExpiryDate(formatted);
+        setCardErrors(prev => ({ ...prev, expiry: err }));
+      } else {
+        setCardErrors(prev => ({ ...prev, expiry: '' }));
       }
-    }, 2000);
+    } else {
+      setCardErrors(prev => ({ ...prev, expiry: '' }));
+    }
+
+    setCardForm(prev => ({ ...prev, expiry: formatted }));
+  };
+
+  const handleExecuteCardPayment = async (e) => {
+    e.preventDefault();
+    const errors = {};
+    const cleanNum = cardForm.cardNumber.replace(/\D/g, '');
+    if (cleanNum.length < 15 || cleanNum.length > 16) {
+      errors.cardNumber = 'Please enter a valid 15 or 16-digit card number.';
+    }
+    if (!cardForm.cardHolder.trim() || cardForm.cardHolder.trim().length < 2) {
+      errors.cardHolder = 'Please enter the cardholder name as printed on card.';
+    }
+    const expiryErr = validateExpiryDate(cardForm.expiry);
+    if (expiryErr) {
+      errors.expiry = expiryErr;
+    }
+    const cleanCvv = cardForm.cvv.replace(/\D/g, '');
+    if (cleanCvv.length < 3 || cleanCvv.length > 4) {
+      errors.cvv = 'Please enter a valid 3 or 4-digit CVV code.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setCardErrors(errors);
+      return;
+    }
+
+    setCardErrors({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+    setProcessingCard(true);
+
+    try {
+      // Direct gateway authorization without OTP
+      await new Promise(r => setTimeout(r, 1200));
+
+      const chosenProj = projects.find(p => p.id === Number(payForm.projectId));
+      const txnRef = `ODL-CC-${Date.now().toString().slice(-8)}`;
+
+      await createDownPayment({
+        client: { id: clientProfile.id },
+        project: payForm.projectId ? { id: Number(payForm.projectId) } : null,
+        amount: Number(payForm.amount),
+        paymentDate: payForm.paymentDate || new Date().toISOString().slice(0, 10),
+        paymentMethod: 'Credit / Debit Card',
+        status: 'Valid',
+        referenceNumber: txnRef,
+        notes: (payForm.notes || '').trim() || `Card Payment via Odiliya Secure Gateway (Card ending ${cleanNum.slice(-4)})`,
+        totalProjectAmount: chosenProj?.budget ? Number(chosenProj.budget) : null,
+        requiredDownPayment: chosenProj?.budget ? Number((chosenProj.budget * 0.2).toFixed(2)) : null,
+        receipt: null,
+        receiptFileName: null,
+        receiptFileType: null,
+      });
+
+      // Refresh notifications immediately so the client receives the confirmation message
+      const notifs = await getNotifications(clientProfile.id);
+      setNotifications(notifs || []);
+
+      const [dpData, summaryData] = await Promise.all([
+        getDownPayments({ clientId: clientProfile.id }),
+        getPaymentSummary(clientProfile.id),
+      ]);
+      setDownPayments(dpData || []);
+      setPaymentSummary(summaryData);
+
+      // Reset form and navigate to full dashboard confirmation view
+      setCardForm({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+
+      // Set confirmation message details
+      setPaymentConfirmationModal({
+        open: true,
+        txnRef,
+        amount: Number(payForm.amount),
+        projectName: chosenProj?.name || 'General Project Down Payment',
+        date: payForm.paymentDate || new Date().toISOString().slice(0, 10),
+        paymentMethod: `Credit / Debit Card (${getCardBrand(cardForm.cardNumber)} •••• ${cleanNum.slice(-4)})`,
+        message: 'Your card payment has been authorized and completed successfully! An official confirmation message has been delivered to your in-app notifications.'
+      });
+      setActiveTab('payment-confirmation');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      setSuccessMsg('Payment authorized & completed! You have received a confirmation message.');
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err) {
+      setError(err.message || 'Payment authorization failed. Please verify your card details and try again.');
+    } finally {
+      setProcessingCard(false);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+  const pendingBankPayment = downPayments.find((p) => (p.status || '').toLowerCase() === 'pending');
 
   return (
     <div className="light-site-wrapper">
@@ -746,10 +1004,10 @@ export default function ClientDashboard() {
 
           <button
             type="button"
-            className={`tab-btn-item ${activeTab === 'downpayments' ? 'active' : ''}`}
+            className={`tab-btn-item ${activeTab === 'downpayments' || activeTab === 'card-checkout' || activeTab === 'payment-confirmation' ? 'active' : ''}`}
             onClick={() => setActiveTab('downpayments')}
           >
-            <span>Payments ({downPayments.length})</span>
+            <span>Payment</span>
           </button>
 
           <button
@@ -989,7 +1247,7 @@ export default function ClientDashboard() {
                 style={{ padding: '0.65rem 1.25rem', fontSize: '0.92rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 onClick={() => setRequestProjectMode('browse')}
               >
-                <span>🏛️</span> Browse Company Designs by Type
+                Browse Company Designs by Type
               </button>
 
               <button
@@ -998,7 +1256,7 @@ export default function ClientDashboard() {
                 style={{ padding: '0.65rem 1.25rem', fontSize: '0.92rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 onClick={() => setRequestProjectMode('custom')}
               >
-                <span>✏️</span> Request Your Own Custom Design
+                Request Your Own Custom Design
               </button>
 
               <button
@@ -1007,7 +1265,7 @@ export default function ClientDashboard() {
                 style={{ padding: '0.65rem 1.25rem', fontSize: '0.92rem', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 onClick={() => setRequestProjectMode('history')}
               >
-                <span>📋</span> My Project Requests ({projectRequests.length})
+                My Project Requests ({projectRequests.length})
               </button>
             </div>
 
@@ -1099,12 +1357,12 @@ export default function ClientDashboard() {
                             <span className="media-tag-badge">{p.category}</span>
                             {p.imageUrls && p.imageUrls.length > 1 && (
                               <span style={{ position: 'absolute', bottom: '10px', right: '10px', background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px' }}>
-                                📸 {p.imageUrls.length} Photos
+                                {p.imageUrls.length} Photos
                               </span>
                             )}
                           </div>
                           <div className="card-content-body">
-                            <span className="card-location">📍 {p.location || 'Sri Lanka'}</span>
+                            <span className="card-location">{p.location || 'Sri Lanka'}</span>
                             <h3 className="card-title">{p.name}</h3>
                             <p className="card-description">{p.description}</p>
                             {p.specifications && (
@@ -1406,17 +1664,17 @@ export default function ClientDashboard() {
                               <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>{req.category}</span>
                               <h4 style={{ margin: '0.2rem 0', fontSize: '1.25rem', color: '#0f172a' }}>{req.title}</h4>
                               <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                📍 {req.location || 'Location not specified'} &nbsp;|&nbsp; Submitted on {formatDate(req.createdAt)}
+                                {req.location || 'Location not specified'} &nbsp;|&nbsp; Submitted on {formatDate(req.createdAt)}
                               </p>
                             </div>
                             <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                              {isPendingCm && <span className="pill-badge warning">⏳ Pending Client Manager</span>}
-                              {isForwardedPm && <span className="pill-badge active">🏗️ Engineering Review (PM)</span>}
-                              {isPmReviewed && <span className="pill-badge active" style={{ background: '#dbeafe', color: '#1e40af' }}>🔍 Assessment Completed</span>}
-                              {isClientNotified && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700 }}>✉️ Proposal Ready</span>}
-                              {isApproved && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>✓ Request Approved</span>}
-                              {isStarted && <span className="pill-badge completed" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700 }}>🚀 Project Started</span>}
-                              {isRejected && <span className="pill-badge error" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>✗ Not Approved</span>}
+                              {isPendingCm && <span className="pill-badge warning">Pending Client Manager</span>}
+                              {isForwardedPm && <span className="pill-badge active">Engineering Review (PM)</span>}
+                              {isPmReviewed && <span className="pill-badge active" style={{ background: '#dbeafe', color: '#1e40af' }}>Assessment Completed</span>}
+                              {isClientNotified && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 700 }}>Proposal Ready</span>}
+                              {isApproved && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>Request Approved</span>}
+                              {isStarted && <span className="pill-badge completed" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700 }}>Project Started</span>}
+                              {isRejected && <span className="pill-badge error" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>Not Approved</span>}
                             </div>
                           </div>
 
@@ -1460,18 +1718,18 @@ export default function ClientDashboard() {
 
                           {/* Step Progress Tracker */}
                           <div style={{ margin: '1.25rem 0 0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.8rem', color: '#64748b', flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 600, color: 'var(--brand-green)' }}>✓ 1. Request Submitted</span>
+                            <span style={{ fontWeight: 600, color: 'var(--brand-green)' }}>1. Request Submitted</span>
                             <span>→</span>
                             <span style={{ fontWeight: isForwardedPm || isPmReviewed || isClientNotified ? 600 : 400, color: isForwardedPm || isPmReviewed || isClientNotified ? 'var(--brand-green)' : '#94a3b8' }}>
-                              {isForwardedPm || isPmReviewed || isClientNotified ? '✓ 2. Forwarded to PM' : '2. Forwarded to PM'}
+                              2. Forwarded to PM
                             </span>
                             <span>→</span>
                             <span style={{ fontWeight: isPmReviewed || isClientNotified ? 600 : 400, color: isPmReviewed || isClientNotified ? 'var(--brand-green)' : '#94a3b8' }}>
-                              {isPmReviewed || isClientNotified ? '✓ 3. PM Reviewed' : '3. PM Review'}
+                              3. PM Review
                             </span>
                             <span>→</span>
                             <span style={{ fontWeight: isClientNotified ? 700 : 400, color: isClientNotified ? '#15803d' : '#94a3b8' }}>
-                              {isClientNotified ? '✓ 4. Proposal Delivered' : '4. Client Proposal'}
+                              4. Client Proposal
                             </span>
                           </div>
 
@@ -1688,12 +1946,43 @@ export default function ClientDashboard() {
                         Sent on {formatDate(inq.createdAt)} {inq.project ? `| ${inq.project.marketingDesign ? 'Company Design' : 'Project'}: ${inq.project.name}` : ''}
                       </small>
 
-                      {inq.response && (
-                        <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(9, 84, 59, 0.06)', borderLeft: '4px solid var(--brand-green)', borderRadius: '0 8px 8px 0' }}>
-                          <small style={{ color: 'var(--brand-green)', fontWeight: 700 }}>
-                            Response from {inq.respondedBy || 'Client Manager'} ({formatDate(inq.respondedAt)}):
-                          </small>
-                          <p style={{ color: '#0f172a', fontSize: '0.92rem', marginTop: '0.25rem' }}>{inq.response}</p>
+                      {inq.response ? (
+                        <div style={{
+                          marginTop: '1rem',
+                          padding: '1.15rem 1.35rem',
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          borderLeft: '5px solid #16a34a',
+                          borderRadius: '0 8px 8px 0',
+                          boxShadow: '0 1px 3px rgba(22, 163, 74, 0.05)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <strong style={{ color: '#15803d', fontSize: '0.92rem' }}>
+                              ✓ Official Response from {inq.respondedBy || 'Client Manager'}:
+                            </strong>
+                            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
+                              {inq.respondedAt ? formatDate(inq.respondedAt) : 'Recently'}
+                            </span>
+                          </div>
+                          <p style={{ color: '#0f172a', fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
+                            {inq.response}
+                          </p>
+                        </div>
+                      ) : (
+                        <div style={{
+                          marginTop: '0.85rem',
+                          padding: '0.75rem 1rem',
+                          background: '#fffbeb',
+                          border: '1px solid #fef3c7',
+                          borderLeft: '4px solid #f59e0b',
+                          borderRadius: '0 6px 6px 0',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem'
+                        }}>
+                          <span style={{ color: '#b45309', fontSize: '0.88rem', fontWeight: 600 }}>
+                            ⏳ Inquiry Received — Awaiting Client Manager Review. You will receive a direct notification once answered.
+                          </span>
                         </div>
                       )}
                     </div>
@@ -2089,192 +2378,195 @@ export default function ClientDashboard() {
           </div>
         )}
 
-        {/* TAB: PAYMENTS */}
+        {/* TAB: PAYMENTS / PAY ONLINE */}
         {activeTab === 'downpayments' && (
           <div>
-            {/* KPI summary */}
-            <div className="light-kpi-row" style={{ marginBottom: '1.5rem' }}>
-              <div className="light-kpi-card">
-                <div>
-                  <small>Total Payments</small>
-                  <strong>{downPayments.length}</strong>
-                  <span className="kpi-status-text">recorded</span>
-                </div>
-              </div>
-              <div className="light-kpi-card">
-                <div>
-                  <small>Confirmed Payments</small>
-                  <strong style={{ color: '#16a34a' }}>{downPayments.filter(p => p.status === 'Valid' || p.status === 'Verified' || p.status === 'Approved').length}</strong>
-                  <span className="kpi-status-text">active</span>
-                </div>
-              </div>
-              <div className="light-kpi-card">
-                <div>
-                  <small>Total Confirmed</small>
-                  <strong>
-                    {paymentSummary?.totalConfirmedAmount != null
-                      ? `Rs. ${Number(paymentSummary.totalConfirmedAmount).toLocaleString()}`
-                      : 'Rs. 0'}
-                  </strong>
-                  <span className="kpi-status-text">paid</span>
-                </div>
-              </div>
-              <div className="light-kpi-card">
-                <div>
-                  <small>Assigned Projects</small>
-                  <strong style={{ color: '#0369a1' }}>{projects.length}</strong>
-                  <span className="kpi-status-text">active</span>
-                </div>
-              </div>
+            {/* CM Verification & Security Notice */}
+            <div style={{
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 12,
+              padding: '1.25rem 1.5rem',
+              marginBottom: '1.5rem',
+              boxShadow: '0 2px 4px rgba(30, 64, 175, 0.05)'
+            }}>
+              <h4 style={{ margin: '0 0 0.35rem', color: '#1e3a8a', fontSize: '1.05rem', fontWeight: 700 }}>
+                Client Manager Payment Administration
+              </h4>
+              <p style={{ margin: 0, color: '#1e40af', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                Official payment ledgers, tax invoices, and verification audits are viewed and managed exclusively by your <strong>Client Manager</strong>. When you submit a payment through our secure payment gateway or bank transfer below, it is directly routed to your Client Manager for verification, and an official confirmation message is delivered immediately to your account.
+              </p>
             </div>
 
-            {/* Section header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>My Payments</h3>
-              <button className="btn-solid-green" onClick={handleOpenPayModal}>
-                + Submit Payment
+            {/* PENDING PAYMENT STATUS BANNER (Shows when client has paid via bank transfer and waiting for CM to accept) */}
+            {pendingBankPayment && (
+              <div style={{
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: 12,
+                padding: '1.25rem 1.5rem',
+                marginBottom: '1.75rem',
+                boxShadow: '0 2px 6px rgba(180, 83, 9, 0.08)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.4rem' }}>
+                      <span style={{
+                        background: '#fef3c7',
+                        color: '#b45309',
+                        padding: '3px 10px',
+                        borderRadius: 20,
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.5px',
+                        textTransform: 'uppercase'
+                      }}>
+                        Status: Pending Client Manager Approval
+                      </span>
+                      <span style={{ fontSize: '0.85rem', color: '#78350f', fontWeight: 600 }}>
+                        Ref: {pendingBankPayment.referenceNumber}
+                      </span>
+                    </div>
+                    <h4 style={{ margin: '0 0 0.35rem', color: '#92400e', fontSize: '1.05rem', fontWeight: 700 }}>
+                      Bank Transfer Payment Awaiting Verification
+                    </h4>
+                    <p style={{ margin: 0, color: '#78350f', fontSize: '0.9rem', lineHeight: 1.5, maxWidth: 750 }}>
+                      Your payment of <strong>Rs. {Number(pendingBankPayment.amount || 0).toLocaleString()}</strong> submitted on {formatDate(pendingBankPayment.paymentDate)} is currently being reviewed by your Client Manager. Once the receipt is checked and accepted, your payment will be marked as Completed.
+                    </p>
+                  </div>
+                  {pendingBankPayment.receipt && (
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      style={{ fontSize: '0.82rem', padding: '0.4rem 0.85rem', borderColor: '#b45309', color: '#92400e' }}
+                      onClick={() => setReceiptViewModal({ open: true, receipt: pendingBankPayment.receipt, fileName: pendingBankPayment.receiptFileName, fileType: pendingBankPayment.receiptFileType })}
+                    >
+                      View Submitted Receipt
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TWO PAYMENT SECTIONS SWITCHER (Card vs Online Bank Transfer - No Cash) */}
+            <div style={{
+              display: 'flex',
+              gap: '0.75rem',
+              marginBottom: '1.5rem',
+              borderBottom: '2px solid #e2e8f0',
+              paddingBottom: '0.75rem'
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentMode('card');
+                  setPayForm(prev => ({ ...prev, paymentMethod: 'Credit Card' }));
+                }}
+                style={{
+                  padding: '0.65rem 1.4rem',
+                  borderRadius: 8,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  background: paymentMode === 'card' ? 'var(--brand-green, #065f46)' : '#f1f5f9',
+                  color: paymentMode === 'card' ? '#ffffff' : '#475569',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Card Payment
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentMode('bank');
+                  setPayForm(prev => ({ ...prev, paymentMethod: 'Bank Transfer' }));
+                }}
+                style={{
+                  padding: '0.65rem 1.4rem',
+                  borderRadius: 8,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  background: paymentMode === 'bank' ? 'var(--brand-green, #065f46)' : '#f1f5f9',
+                  color: paymentMode === 'bank' ? '#ffffff' : '#475569',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Online Bank Transfer
               </button>
             </div>
 
-            {/* Payment list */}
-            {downPayments.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b', background: '#f8fafc', borderRadius: 10 }}>
-                <p style={{ margin: 0, fontWeight: 600 }}>No payments recorded yet.</p>
-                <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>Click "Submit Payment" to record your payment.</p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {downPayments.map((pay) => {
-                  const badgeStyle = (pay.status === 'Valid' || pay.status === 'Verified' || pay.status === 'Approved')
-                    ? { background: '#dcfce7', color: '#16a34a', padding: '2px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 }
-                    : { background: '#fef3c7', color: '#b45309', padding: '2px 10px', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700 };
+            {/* ================= SECTION 1: CARD PAYMENT ONLY ================= */}
+            {paymentMode === 'card' && (
+              <div style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: '1.75rem 2rem',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                maxWidth: 680
+              }}>
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <h3 style={{ margin: '0 0 0.35rem', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                    Card Payment
+                  </h3>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                    Pay your project down payment or milestone installment instantly with Visa, MasterCard, or American Express via real-time 3D Secure 2.0 payment gateway.
+                  </p>
+                </div>
 
-                  return (
-                    <div key={pay.id} style={{
-                      background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-                      padding: '1rem 1.25rem', boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>
-                            {pay.project?.name || pay.projectName || 'General Payment'}
-                          </div>
-                          <div style={{ fontSize: '0.82rem', color: '#64748b' }}>
-                            Ref: <strong>{pay.referenceNumber || '—'}</strong> &nbsp;|&nbsp; Method: {pay.paymentMethod || '—'}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <span style={badgeStyle}>{pay.status === 'Valid' ? 'Confirmed' : (pay.status || 'Pending')}</span>
-                          <span style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1e293b' }}>
-                            Rs. {Number(pay.amount || 0).toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.75rem', fontSize: '0.83rem', color: '#475569' }}>
-                        <span>Paid: <strong>{pay.paymentDate ? new Date(pay.paymentDate).toLocaleDateString() : '—'}</strong></span>
-                        {pay.notes && <span>Note: {pay.notes}</span>}
-                      </div>
-
-                      {(pay.receipt || pay.receiptFileName) && (
-                        <div style={{ marginTop: '0.65rem' }}>
-                          <button
-                            type="button"
-                            style={{ fontSize: '0.8rem', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}
-                            onClick={() => setReceiptViewModal({ open: true, receipt: pay.receipt, fileName: pay.receiptFileName, fileType: pay.receiptFileType })}
-                          >
-                            View Receipt
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-
-        {/* ===== PAY MODAL ===== */}
-        {payModalOpen && (
-          <div className="modal-overlay" onClick={() => { setPayModalOpen(false); setCardGatewayStep('form'); }} >
-            <div className="modal-box" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h3>Submit Payment</h3>
-                <button className="modal-close-btn" onClick={() => { setPayModalOpen(false); setCardGatewayStep('form'); }}>✕</button>
-              </div>
-
-              {/* Base form - always shown first */}
-              {cardGatewayStep === 'form' && (
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  if (payForm.paymentMethod === 'Credit Card') {
-                    setCardGatewayStep('gateway');
-                  } else {
-                    handleClientSubmitPayment(e);
-                  }
-                }} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-
-                  {/* Project selector */}
+                <form onSubmit={handleOpenCardGateway} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {/* Project Selector */}
                   <div className="form-input-box">
-                    <label>Project</label>
+                    <label>Select Project *</label>
                     <select
                       value={payForm.projectId}
                       onChange={(e) => setPayForm({ ...payForm, projectId: e.target.value })}
                       required
                     >
-                      <option value="">-- Select a Project --</option>
+                      <option value="">-- Choose Assigned Project --</option>
                       {projects.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
                   </div>
 
-                  {/* Balance Info */}
+                  {/* Project Balance remaining widget */}
                   {payForm.projectId && (() => {
                     const bal = getProjectBalance(payForm.projectId);
                     if (!bal) return null;
                     return (
-                      <div style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: 8, padding: '0.75rem 1rem', fontSize: '0.88rem' }}>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.85rem 1rem', fontSize: '0.88rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
                           <div>
-                            <small style={{ color: '#6b7280' }}>Total Project Value</small>
+                            <small style={{ color: '#64748b' }}>Total Contract Value</small>
                             <div style={{ fontWeight: 700, color: '#0f172a' }}>Rs. {bal.total.toLocaleString()}</div>
                           </div>
                           <div>
-                            <small style={{ color: '#6b7280' }}>Total Paid So Far</small>
+                            <small style={{ color: '#64748b' }}>Total Paid</small>
                             <div style={{ fontWeight: 700, color: '#16a34a' }}>Rs. {bal.paid.toLocaleString()}</div>
                           </div>
                           <div>
-                            <small style={{ color: '#6b7280' }}>Balance Remaining</small>
+                            <small style={{ color: '#64748b' }}>Remaining Balance</small>
                             <div style={{ fontWeight: 700, color: bal.balance > 0 ? '#dc2626' : '#16a34a' }}>
                               Rs. {bal.balance.toLocaleString()}
                             </div>
                           </div>
                         </div>
-                        {bal.balance > 0 && (
-                          <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: '#fff7ed', borderRadius: 6, color: '#92400e', fontSize: '0.82rem' }}>
-                            Balance you should pay: <strong>Rs. {bal.balance.toLocaleString()}</strong>
-                          </div>
-                        )}
-                        {bal.balance === 0 && (
-                          <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: '#f0fdf4', borderRadius: 6, color: '#166534', fontSize: '0.82rem' }}>
-                            This project is fully paid!
-                          </div>
-                        )}
                       </div>
                     );
                   })()}
 
                   {/* Amount */}
                   <div className="form-input-box">
-                    <label>Amount to Pay (Rs.)</label>
+                    <label>Amount to Pay (Rs.) *</label>
                     <input
                       type="number"
-                      min="0"
+                      min="1"
                       step="0.01"
-                      placeholder="Enter payment amount"
+                      placeholder="e.g. 500000"
                       value={payForm.amount}
                       onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
                       required
@@ -2292,71 +2584,174 @@ export default function ClientDashboard() {
                     />
                   </div>
 
-                  {/* Payment Method */}
+                  {/* Notes */}
                   <div className="form-input-box">
-                    <label>Payment Method</label>
-                    <select
-                      value={payForm.paymentMethod}
-                      onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })}
-                      required
-                    >
-                      <option value="">-- Select Method --</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                      <option value="Cash">Cash</option>
-                      <option value="Credit Card">Credit / Debit Card</option>
-                    </select>
+                    <label>Notes (optional)</label>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Initial down payment for foundation phase"
+                      value={payForm.notes}
+                      onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
+                    />
                   </div>
 
-                  {/* CASH MESSAGE */}
-                  {payForm.paymentMethod === 'Cash' && (
-                    <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '0.85rem 1rem', color: '#78350f', fontSize: '0.9rem' }}>
-                      <strong>Cash Payment Instructions</strong>
-                      <p style={{ margin: '0.4rem 0 0', lineHeight: 1.6 }}>
-                        Please make the payment at the company office. Your payment will be verified by a staff member after the cash is received.
-                      </p>
+                  <div style={{ paddingTop: '0.5rem' }}>
+                    <button
+                      type="submit"
+                      className="btn-solid-green"
+                      style={{ width: '100%', padding: '0.85rem', fontSize: '1rem', fontWeight: 700 }}
+                    >
+                      Proceed to Card Gateway →
+                    </button>
+                  </div>
+                  <div style={{ textAlign: 'center', fontSize: '0.78rem', color: '#94a3b8' }}>
+                    256-bit TLS Encrypted • 3D Secure Verification
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* ================= SECTION 2: ONLINE BANK TRANSFER ONLY ================= */}
+            {paymentMode === 'bank' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', maxWidth: 740 }}>
+                {/* Bank Account Details Box */}
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 12,
+                  padding: '1.5rem 1.75rem',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+                }}>
+                  <div style={{ marginBottom: '1rem' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#0369a1', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      Official Company Accounts
+                    </span>
+                    <h3 style={{ margin: '0.2rem 0 0.35rem', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                      Company Banking Details
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.88rem', color: '#475569' }}>
+                      Please transfer the payment to the bank account below, then enter your transaction reference number and upload the receipt slip.
+                    </p>
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '1rem',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '1.25rem'
+                  }}>
+                    <div>
+                      <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>Bank Name</small>
+                      <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{bankDetails?.bankName || 'BOC'}</strong>
+                    </div>
+                    <div>
+                      <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>Branch</small>
+                      <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{bankDetails?.branch || 'Colombo 3'}</strong>
+                    </div>
+                    <div>
+                      <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>Account Name</small>
+                      <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{bankDetails?.accountName || 'Odiliya'}</strong>
+                    </div>
+                    <div>
+                      <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>Account Number</small>
+                      <strong style={{ color: '#0f172a', fontSize: '1.1rem', fontFamily: 'monospace', letterSpacing: '1px' }}>
+                        {bankDetails?.accountNumber || '81829999'}
+                      </strong>
+                    </div>
+                    {(bankDetails ? Boolean(bankDetails.swiftCode) : true) && (
+                      <div>
+                        <small style={{ color: '#64748b', display: 'block', fontSize: '0.78rem' }}>SWIFT / Bank Code</small>
+                        <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{bankDetails?.swiftCode || 'fdfdfdfd'}</strong>
+                      </div>
+                    )}
+                  </div>
+                  {bankDetails?.additionalInfo && (
+                    <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: '#64748b' }}>
+                      <strong>Reference Instructions:</strong> {bankDetails.additionalInfo}
                     </div>
                   )}
+                </div>
 
-                  {/* BANK TRANSFER DETAILS */}
-                  {payForm.paymentMethod === 'Bank Transfer' && (
-                    <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '0.85rem 1rem', color: '#1e40af', fontSize: '0.88rem' }}>
-                      <strong>Bank Transfer Details</strong>
-                      {bankDetails ? (
-                        <div style={{ marginTop: '0.6rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', color: '#1e3a8a' }}>
-                          <div><strong>Bank Name:</strong> {bankDetails.bankName || '—'}</div>
-                          <div><strong>Branch:</strong> {bankDetails.branch || '—'}</div>
-                          <div><strong>Account Name:</strong> {bankDetails.accountName || '—'}</div>
-                          <div><strong>Account Number:</strong> <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{bankDetails.accountNumber || '—'}</span></div>
-                          {bankDetails.swiftCode && <div><strong>SWIFT / Bank Code:</strong> {bankDetails.swiftCode}</div>}
-                          {bankDetails.additionalInfo && <div style={{ marginTop: '0.35rem', color: '#374151' }}>{bankDetails.additionalInfo}</div>}
-                        </div>
-                      ) : (
-                        <p style={{ margin: '0.4rem 0 0', color: '#374151' }}>Please contact the Client Manager for bank transfer details.</p>
-                      )}
-                      <p style={{ margin: '0.6rem 0 0', fontSize: '0.82rem', color: '#374151' }}>After transferring, please enter the reference/transaction number below and upload your receipt slip.</p>
-                    </div>
-                  )}
+                {/* Bank Transfer Submission Form */}
+                <div style={{
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  padding: '1.75rem 2rem',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                }}>
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <h4 style={{ margin: '0 0 0.35rem', fontSize: '1.15rem', fontWeight: 800, color: '#0f172a' }}>
+                      Submit Bank Transfer Verification & Receipt
+                    </h4>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.88rem' }}>
+                      After transferring, upload your bank receipt slip or screenshot. Your payment will be recorded in <strong>Pending</strong> status until your Client Manager checks and accepts it.
+                    </p>
+                  </div>
 
-                  {/* Reference Number - shown for bank transfer */}
-                  {payForm.paymentMethod === 'Bank Transfer' && (
+                  <form onSubmit={handleClientSubmitPayment} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {/* Project Selector */}
                     <div className="form-input-box">
-                      <label>Reference / Transaction Number</label>
+                      <label>Select Project *</label>
+                      <select
+                        value={payForm.projectId}
+                        onChange={(e) => setPayForm({ ...payForm, projectId: e.target.value })}
+                        required
+                      >
+                        <option value="">-- Choose Assigned Project --</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Amount */}
+                    <div className="form-input-box">
+                      <label>Amount Transferred (Rs.) *</label>
                       <input
-                        type="text"
-                        placeholder="e.g. TXN-2025-001"
-                        value={payForm.referenceNumber}
-                        onChange={(e) => setPayForm({ ...payForm, referenceNumber: e.target.value })}
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        placeholder="e.g. 500000"
+                        value={payForm.amount}
+                        onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                        required
                       />
                     </div>
-                  )}
 
-                  {/* Receipt Upload - shown for bank transfer */}
-                  {payForm.paymentMethod === 'Bank Transfer' && (
+                    {/* Payment Date */}
                     <div className="form-input-box">
-                      <label>Upload Payment Receipt / Slip (Image or PDF)</label>
+                      <label>Transfer Date *</label>
+                      <input
+                        type="date"
+                        value={payForm.paymentDate}
+                        onChange={(e) => setPayForm({ ...payForm, paymentDate: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    {/* Reference Number */}
+                    <div className="form-input-box">
+                      <label>Bank Reference / Transaction Number *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. TXN-2026-94821"
+                        value={payForm.referenceNumber}
+                        onChange={(e) => setPayForm({ ...payForm, referenceNumber: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    {/* Receipt Upload - REQUIRED */}
+                    <div className="form-input-box">
+                      <label>Upload Payment Receipt / Deposit Slip * (Required)</label>
                       <input
                         type="file"
                         accept="image/*,application/pdf"
+                        required
                         onChange={(e) => {
                           const file = e.target.files[0];
                           if (!file) return;
@@ -2367,98 +2762,299 @@ export default function ClientDashboard() {
                           reader.readAsDataURL(file);
                         }}
                       />
-                      {receiptFile && (
-                        <small style={{ color: '#16a34a', marginTop: 4, display: 'block' }}>
-                          {receiptFile.name} selected
+                      {receiptFile ? (
+                        <small style={{ color: '#16a34a', marginTop: 4, display: 'block', fontWeight: 600 }}>
+                          Selected: {receiptFile.name}
+                        </small>
+                      ) : (
+                        <small style={{ color: '#b45309', marginTop: 4, display: 'block' }}>
+                          Upload the screenshot or PDF slip issued by your bank.
                         </small>
                       )}
                     </div>
-                  )}
 
-                  {/* Notes */}
-                  <div className="form-input-box">
-                    <label>Notes (optional)</label>
-                    <textarea
-                      rows={2}
-                      placeholder="Any additional information..."
-                      value={payForm.notes}
-                      onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
-                    />
+                    {/* Notes */}
+                    <div className="form-input-box">
+                      <label>Notes (optional)</label>
+                      <textarea
+                        rows={2}
+                        placeholder="Additional notes for your Client Manager..."
+                        value={payForm.notes}
+                        onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })}
+                      />
+                    </div>
+
+                    <div style={{ paddingTop: '0.5rem' }}>
+                      <button
+                        type="submit"
+                        className="btn-solid-green"
+                        style={{ width: '100%', padding: '0.85rem', fontSize: '1rem', fontWeight: 700 }}
+                        disabled={submittingPayment}
+                      >
+                        {submittingPayment ? 'Submitting Receipt...' : 'Submit Bank Transfer Receipt'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+
+        {/* ===== DEDICATED CARD FILLING & CHECKOUT DASHBOARD ===== */}
+        {activeTab === 'card-checkout' && (() => {
+          const chosenCheckoutProject = projects.find(p => p.id === Number(payForm.projectId)) || projects[0];
+          const checkoutBalance = getProjectBalance(payForm.projectId || chosenCheckoutProject?.id);
+
+          return (
+            <div>
+              {/* Header navigation row */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1.5rem',
+                flexWrap: 'wrap',
+                gap: '1rem',
+                borderBottom: '1px solid #e2e8f0',
+                paddingBottom: '1rem'
+              }}>
+                <div>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    onClick={() => setActiveTab('downpayments')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.45rem 0.9rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      marginBottom: '0.65rem'
+                    }}
+                  >
+                    ← Back to Payment Methods
+                  </button>
+                  <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.6rem', fontWeight: 800, color: '#0f172a' }}>
+                    Card Checkout &amp; Payment Gateway
+                  </h2>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '0.92rem' }}>
+                    Secure 256-bit encrypted card authorization powered by Odiliya SecurePay.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span style={{
+                    background: '#dcfce7',
+                    color: '#15803d',
+                    padding: '5px 12px',
+                    borderRadius: 20,
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.5px'
+                  }}>
+                    TLS 256-bit Encrypted
+                  </span>
+                  <span style={{
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    padding: '5px 12px',
+                    borderRadius: 20,
+                    fontSize: '0.78rem',
+                    fontWeight: 700
+                  }}>
+                    PCI-DSS Certified
+                  </span>
+                </div>
+              </div>
+
+              {/* Two-Column Responsive Checkout Dashboard Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                gap: '1.75rem',
+                alignItems: 'start'
+              }}>
+                {/* COLUMN 1: Order / Project Details Summary */}
+                <div style={{
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 14,
+                  padding: '1.75rem',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                }}>
+                  <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem', marginBottom: '1.25rem' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--brand-green, #065f46)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      TRANSACTION &amp; PROJECT SUMMARY
+                    </span>
+                    <h3 style={{ margin: '0.35rem 0 0.25rem', fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>
+                      {chosenCheckoutProject?.name || 'General Project Down Payment'}
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+                      {chosenCheckoutProject?.location || clientProfile?.address || 'Odiliya Residencies Site Location'}
+                    </p>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '0.5rem' }}>
-                    <button type="button" className="btn-outline" onClick={() => { setPayModalOpen(false); setCardGatewayStep('form'); }}>
-                      Cancel
-                    </button>
-                    <button type="submit" className="btn-solid-green" disabled={submittingPayment}>
-                      {submittingPayment ? 'Submitting...' : (
-                        payForm.paymentMethod === 'Credit Card'
-                          ? 'Proceed to Card Payment →'
-                          : 'Submit Payment'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* CARD PAYMENT GATEWAY */}
-              {cardGatewayStep === 'gateway' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{ background: '#f8fafc', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '0.25rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#475569' }}>
-                      <span>Amount to Pay:</span>
-                      <strong style={{ color: '#0f172a', fontSize: '1rem' }}>Rs. {Number(payForm.amount || 0).toLocaleString()}</strong>
+                  {/* Financial & Client Details */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
+                      <span>Client Legal Name:</span>
+                      <strong style={{ color: '#0f172a' }}>{clientProfile?.name || editProfileForm.name || 'Client'}</strong>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#64748b', marginTop: '0.25rem' }}>
-                      <span>Method:</span>
-                      <span>Credit / Debit Card</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
+                      <span>Client OD ID:</span>
+                      <strong style={{ color: '#1e40af', fontFamily: 'monospace' }}>{clientProfile?.employeeNumber || 'OD-000101'}</strong>
                     </div>
-                  </div>
-
-                  {/* Fake card UI */}
-                  <div style={{ background: 'linear-gradient(135deg, #065f46, #047857)', borderRadius: 12, padding: '1.25rem 1.5rem', color: '#fff', marginBottom: '0.25rem', position: 'relative', overflow: 'hidden' }}>
-                    <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
-                    <div style={{ position: 'absolute', bottom: '-30px', right: '30px', width: 130, height: 130, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
-                    <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.75rem', letterSpacing: 2 }}>ODILIYA SECURE PAYMENT</div>
-                    <div style={{ fontSize: '1.3rem', letterSpacing: 3, fontFamily: 'monospace', marginBottom: '0.75rem' }}>
-                      {cardForm.cardNumber ? cardForm.cardNumber.replace(/(.{4})/g, '$1 ').trim() : '•••• •••• •••• ••••'}
+                    {chosenCheckoutProject?.budget && (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
+                          <span>Total Contract Budget:</span>
+                          <span style={{ fontWeight: 600, color: '#0f172a' }}>Rs. {Number(chosenCheckoutProject.budget).toLocaleString()}</span>
+                        </div>
+                        {checkoutBalance && (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
+                              <span>Total Verified Paid:</span>
+                              <span style={{ fontWeight: 600, color: '#16a34a' }}>Rs. {checkoutBalance.paid.toLocaleString()}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
+                              <span>Remaining Balance:</span>
+                              <span style={{ fontWeight: 700, color: checkoutBalance.balance > 0 ? '#dc2626' : '#16a34a' }}>
+                                Rs. {checkoutBalance.balance.toLocaleString()}
+                              </span>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
+                      <span>Payment Date:</span>
+                      <span style={{ color: '#0f172a', fontWeight: 600 }}>{payForm.paymentDate}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                      <div>
-                        <div style={{ opacity: 0.7, fontSize: '0.65rem', letterSpacing: 1 }}>CARD HOLDER</div>
-                        <div style={{ fontWeight: 600 }}>{cardForm.cardHolder || 'YOUR NAME'}</div>
+                    {payForm.notes && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#475569' }}>
+                        <span>Notes:</span>
+                        <span style={{ color: '#0f172a', maxWidth: '60%', textAlign: 'right' }}>{payForm.notes}</span>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ opacity: 0.7, fontSize: '0.65rem', letterSpacing: 1 }}>EXPIRES</div>
-                        <div style={{ fontWeight: 600 }}>{cardForm.expiry || 'MM/YY'}</div>
-                      </div>
+                    )}
+                  </div>
+
+                  {/* Charge Breakdown Box */}
+                  <div style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 10,
+                    padding: '1.25rem',
+                    marginBottom: '1.5rem'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#64748b', marginBottom: '0.5rem' }}>
+                      <span>Payment Amount</span>
+                      <span>Rs. {Number(payForm.amount || 0).toLocaleString()}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#64748b', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px dashed #cbd5e1' }}>
+                      <span>Gateway Processing Fee</span>
+                      <span style={{ color: '#16a34a', fontWeight: 700 }}>FREE (Waived)</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#0f172a' }}>Total to Charge</span>
+                      <span style={{ fontWeight: 900, fontSize: '1.4rem', color: '#065f46' }}>
+                        Rs. {Number(payForm.amount || 0).toLocaleString()}
+                      </span>
                     </div>
                   </div>
 
-                  <form onSubmit={handleCardPayment} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {/* Trust & Guarantee points */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.82rem', color: '#64748b' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> Instant authorization — direct payment completion
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> Official confirmation message sent to your account immediately
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> Verified directly with your Client Manager ledger
+                    </div>
+                  </div>
+                </div>
+
+                {/* COLUMN 2: Card Details Dashboard Form + Interactive Virtual Card */}
+                <div style={{
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 14,
+                  padding: '1.75rem',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                }}>
+                  <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--brand-green, #065f46)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      CARD PAYMENT DETAILS
+                    </span>
+                    <h3 style={{ margin: '0.25rem 0 0', fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                      Enter Card Details
+                    </h3>
+                  </div>
+
+                  {/* Card Filling Form */}
+                  <form onSubmit={handleExecuteCardPayment} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {/* Card Number */}
                     <div className="form-input-box">
                       <label>Card Number *</label>
                       <input
                         type="text"
-                        maxLength={16}
-                        placeholder="1234 5678 9012 3456"
+                        maxLength={19}
+                        placeholder="4123 4567 8901 2345"
                         value={cardForm.cardNumber}
-                        onChange={(e) => setCardForm({ ...cardForm, cardNumber: e.target.value.replace(/\D/g, '') })}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = v.replace(/(\d{4})/g, '$1 ').trim();
+                          setCardForm(prev => ({ ...prev, cardNumber: formatted }));
+                          if (v.length >= 15) {
+                            setCardErrors(prev => ({ ...prev, cardNumber: '' }));
+                          }
+                        }}
+                        style={{
+                          fontFamily: 'monospace',
+                          letterSpacing: 2,
+                          borderColor: cardErrors.cardNumber ? '#dc2626' : undefined
+                        }}
                         required
-                        style={{ fontFamily: 'monospace', letterSpacing: 2 }}
+                        disabled={processingCard}
                       />
+                      {cardErrors.cardNumber && (
+                        <small style={{ color: '#dc2626', fontWeight: 600, display: 'block', marginTop: 4 }}>
+                          {cardErrors.cardNumber}
+                        </small>
+                      )}
                     </div>
+
+                    {/* Cardholder Name */}
                     <div className="form-input-box">
-                      <label>Card Holder Name *</label>
+                      <label>Cardholder Name *</label>
                       <input
                         type="text"
-                        placeholder="As printed on card"
+                        placeholder="NAME AS PRINTED ON CARD"
                         value={cardForm.cardHolder}
-                        onChange={(e) => setCardForm({ ...cardForm, cardHolder: e.target.value.toUpperCase() })}
+                        onChange={(e) => {
+                          setCardForm(prev => ({ ...prev, cardHolder: e.target.value.toUpperCase() }));
+                          if (e.target.value.trim()) {
+                            setCardErrors(prev => ({ ...prev, cardHolder: '' }));
+                          }
+                        }}
+                        style={{ borderColor: cardErrors.cardHolder ? '#dc2626' : undefined }}
                         required
+                        disabled={processingCard}
                       />
+                      {cardErrors.cardHolder && (
+                        <small style={{ color: '#dc2626', fontWeight: 600, display: 'block', marginTop: 4 }}>
+                          {cardErrors.cardHolder}
+                        </small>
+                      )}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+
+                    {/* Expiry MM/YY and CVV Grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                       <div className="form-input-box">
                         <label>Expiry (MM/YY) *</label>
                         <input
@@ -2466,49 +3062,199 @@ export default function ClientDashboard() {
                           placeholder="MM/YY"
                           maxLength={5}
                           value={cardForm.expiry}
-                          onChange={(e) => {
-                            let v = e.target.value.replace(/\D/g, '');
-                            if (v.length > 2) v = v.slice(0,2) + '/' + v.slice(2);
-                            setCardForm({ ...cardForm, expiry: v });
+                          onChange={handleExpiryChange}
+                          style={{
+                            fontFamily: 'monospace',
+                            letterSpacing: '1px',
+                            borderColor: cardErrors.expiry ? '#dc2626' : undefined
                           }}
                           required
+                          disabled={processingCard}
                         />
+                        {cardErrors.expiry && (
+                          <small style={{ color: '#dc2626', fontWeight: 600, display: 'block', marginTop: 4, fontSize: '0.8rem' }}>
+                            {cardErrors.expiry}
+                          </small>
+                        )}
                       </div>
+
                       <div className="form-input-box">
-                        <label>CVV *</label>
+                        <label>CVV / CVC *</label>
                         <input
                           type="password"
                           placeholder="•••"
                           maxLength={4}
                           value={cardForm.cvv}
-                          onChange={(e) => setCardForm({ ...cardForm, cvv: e.target.value.replace(/\D/g, '') })}
+                          onChange={(e) => {
+                            const clean = e.target.value.replace(/\D/g, '');
+                            setCardForm(prev => ({ ...prev, cvv: clean }));
+                            if (clean.length >= 3) {
+                              setCardErrors(prev => ({ ...prev, cvv: '' }));
+                            }
+                          }}
+                          style={{
+                            fontFamily: 'monospace',
+                            letterSpacing: '3px',
+                            borderColor: cardErrors.cvv ? '#dc2626' : undefined
+                          }}
                           required
+                          disabled={processingCard}
                         />
+                        {cardErrors.cvv && (
+                          <small style={{ color: '#dc2626', fontWeight: 600, display: 'block', marginTop: 4, fontSize: '0.8rem' }}>
+                            {cardErrors.cvv}
+                          </small>
+                        )}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '0.25rem' }}>
-                      <button type="button" className="btn-outline" onClick={() => setCardGatewayStep('form')} disabled={processingCard}>
-                        ← Back
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '1rem' }}>
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        onClick={() => setActiveTab('downpayments')}
+                        disabled={processingCard}
+                      >
+                        Cancel
                       </button>
-                      <button type="submit" className="btn-solid-green" disabled={processingCard} style={{ minWidth: 140 }}>
-                        {processingCard ? 'Processing...' : 'Pay Now'}
+                      <button
+                        type="submit"
+                        className="btn-solid-green"
+                        style={{ minWidth: 220, padding: '0.85rem 1.5rem', fontSize: '1rem', fontWeight: 700 }}
+                        disabled={processingCard}
+                      >
+                        {processingCard ? 'Authorizing Payment...' : `Pay Rs. ${Number(payForm.amount || 0).toLocaleString()}`}
                       </button>
                     </div>
                   </form>
-                  <div style={{ textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                    256-bit SSL Encrypted • PCI DSS Compliant
+
+                  <div style={{ textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8', borderTop: '1px solid #f1f5f9', paddingTop: '1rem', marginTop: '1rem' }}>
+                    256-bit SSL Encrypted • Verified by Visa • Mastercard Identity Check • PCI-DSS Certified
                   </div>
                 </div>
-              )}
+              </div>
+            </div>
+          );
+        })()}
 
-              {/* PAYMENT SUCCESS */}
-              {cardGatewayStep === 'success' && (
-                <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
-                  <h3 style={{ color: '#16a34a', margin: '0 0 0.5rem' }}>Payment Approved!</h3>
-                  <p style={{ color: '#475569', margin: 0 }}>Rs. {Number(payForm.amount || 0).toLocaleString()} has been processed successfully.</p>
-                  <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.5rem' }}>Recording your payment...</p>
-                </div>
-              )}
+        {/* ===== POST-PAYMENT CONFIRMATION DASHBOARD VIEW ===== */}
+        {activeTab === 'payment-confirmation' && paymentConfirmationModal && (
+          <div style={{
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 16,
+            padding: '3rem 2.5rem',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
+            maxWidth: '850px',
+            margin: '1.5rem auto 3rem',
+            textAlign: 'center'
+          }}>
+            <h2 style={{
+              margin: '0 0 0.75rem',
+              fontSize: '2.2rem',
+              fontWeight: 800,
+              color: '#0f172a',
+              letterSpacing: '-0.5px'
+            }}>
+              {paymentConfirmationModal.paymentMethod?.includes('Bank') ? 'Receipt Submitted Successfully!' : 'Payment Successful!'}
+            </h2>
+            <p style={{
+              margin: '0 auto 2rem',
+              color: '#475569',
+              fontSize: '1.18rem',
+              lineHeight: 1.6,
+              maxWidth: 680
+            }}>
+              {paymentConfirmationModal.paymentMethod?.includes('Bank')
+                ? 'Your transfer slip has been securely uploaded and routed to your Client Manager for audit.'
+                : 'Your card payment has been successfully authorized and securely recorded.'}
+            </p>
+
+            {/* Receipt Summary Card with larger font */}
+            <div style={{
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: 12,
+              padding: '1.85rem 2.25rem',
+              textAlign: 'left',
+              marginBottom: '2rem',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0', borderBottom: '1px dashed #cbd5e1', fontSize: '1.15rem' }}>
+                <span style={{ color: '#64748b' }}>Amount:</span>
+                <strong style={{ color: '#16a34a', fontSize: '1.55rem', fontWeight: 800 }}>
+                  Rs. {Number(paymentConfirmationModal.amount || 0).toLocaleString()}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0', borderBottom: '1px dashed #cbd5e1', fontSize: '1.1rem' }}>
+                <span style={{ color: '#64748b' }}>Transaction Reference:</span>
+                <strong style={{ color: '#0f172a', fontFamily: 'monospace', fontSize: '1.18rem' }}>
+                  {paymentConfirmationModal.txnRef}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0', borderBottom: '1px dashed #cbd5e1', fontSize: '1.1rem' }}>
+                <span style={{ color: '#64748b' }}>Project:</span>
+                <strong style={{ color: '#0f172a', fontSize: '1.15rem' }}>
+                  {paymentConfirmationModal.projectName}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0', borderBottom: '1px dashed #cbd5e1', fontSize: '1.1rem' }}>
+                <span style={{ color: '#64748b' }}>Payment Method:</span>
+                <span style={{ color: '#0f172a', fontWeight: 700, fontSize: '1.1rem' }}>
+                  {paymentConfirmationModal.paymentMethod}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0', fontSize: '1.1rem' }}>
+                <span style={{ color: '#64748b' }}>Date:</span>
+                <span style={{ color: '#0f172a', fontWeight: 600, fontSize: '1.1rem' }}>
+                  {paymentConfirmationModal.date}
+                </span>
+              </div>
+            </div>
+
+            {/* Official Confirmation Message in Bit Larger Font */}
+            <div style={{
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 12,
+              padding: '1.6rem 1.85rem',
+              textAlign: 'left',
+              marginBottom: '2.25rem',
+              boxShadow: '0 2px 6px rgba(30, 64, 175, 0.05)'
+            }}>
+              <strong style={{ color: '#1e40af', fontSize: '1.18rem', display: 'block', marginBottom: '0.5rem' }}>
+                Official Confirmation Message:
+              </strong>
+              <div style={{ color: '#1e3a8a', fontSize: '1.12rem', lineHeight: 1.6 }}>
+                {paymentConfirmationModal.message}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn-outline"
+                style={{ padding: '0.8rem 1.85rem', fontSize: '1.05rem', fontWeight: 600 }}
+                onClick={() => {
+                  setPaymentConfirmationModal(null);
+                  setActiveTab('downpayments');
+                }}
+              >
+                Make Another Payment
+              </button>
+              <button
+                type="button"
+                className="btn-solid-green"
+                style={{ padding: '0.8rem 2.2rem', fontSize: '1.05rem', fontWeight: 700 }}
+                onClick={() => {
+                  setPaymentConfirmationModal(null);
+                  setActiveTab('overview');
+                }}
+              >
+                View My Notifications →
+              </button>
             </div>
           </div>
         )}

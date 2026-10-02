@@ -72,8 +72,16 @@ const computeStatusFromDates = (paymentDate, validUntil) => {
   return 'Valid';
 };
 
+const isCardPayment = (p) => {
+  const m = (p?.paymentMethod || '').toLowerCase();
+  return m.includes('card') || m.includes('credit') || m.includes('debit') || m === 'online';
+};
+
+const isBankPayment = (p) => !isCardPayment(p);
+
 export default function ClientManagerDashboard() {
   const [activeTab, setActiveTab] = useState('summary'); // summary, clients, contracts, expiring, projects, inquiries, documents, feedbacks, payments
+  const [paymentSectionTab, setPaymentSectionTab] = useState('ALL'); // 'ALL' | 'CARD' | 'BANK'
 
   // Data states
   const [summary, setSummary] = useState(null);
@@ -180,6 +188,11 @@ export default function ClientManagerDashboard() {
   const [responseModalOpen, setResponseModalOpen] = useState(false);
   const [activeInquiry, setActiveInquiry] = useState(null);
   const [responseText, setResponseText] = useState('');
+  const [sendingResponse, setSendingResponse] = useState(false);
+  const [inquirySearch, setInquirySearch] = useState('');
+  const [inquiryFilter, setInquiryFilter] = useState('ALL'); // ALL | PENDING | ANSWERED
+  const [inlineReplyingId, setInlineReplyingId] = useState(null);
+  const [inlineReplyText, setInlineReplyText] = useState('');
 
   const [docModalOpen, setDocModalOpen] = useState(false);
   const [docForm, setDocForm] = useState({
@@ -270,6 +283,10 @@ export default function ClientManagerDashboard() {
       setProjectRequests(requestsData || []);
       if (bankDet) {
         setBankDetails(bankDet);
+        try {
+          localStorage.setItem('odiliya-bank-details', JSON.stringify(bankDet));
+          localStorage.setItem('odiliya-bank-details-timestamp', String(Date.now()));
+        } catch {}
         setBankDetailsForm({
           bankName: bankDet.bankName || '',
           branch: bankDet.branch || '',
@@ -293,6 +310,11 @@ export default function ClientManagerDashboard() {
     try {
       const saved = await updateBankDetails(bankDetailsForm);
       setBankDetails(saved);
+      try {
+        localStorage.setItem('odiliya-bank-details', JSON.stringify(saved));
+        localStorage.setItem('odiliya-bank-details-timestamp', String(Date.now()));
+        window.dispatchEvent(new CustomEvent('odiliya-bank-details-updated', { detail: saved }));
+      } catch {}
       setBankDetailsModalOpen(false);
       setSuccessMsg('Bank details updated successfully! Clients will now see the updated details when selecting Bank Transfer.');
       setTimeout(() => setSuccessMsg(''), 5000);
@@ -488,6 +510,9 @@ export default function ClientManagerDashboard() {
 
       const primaryImage = cleanedImages[0] || projectForm.imageUrl || null;
 
+      const rawPrice = (projectForm.priceRange || '').trim();
+      const parsedBudget = parseFloat(rawPrice.replace(/[^0-9.]/g, '')) || (projectForm.budget ? Number(projectForm.budget) : 0);
+
       const payload = {
         ...(editingProject || {}),
         name: projectForm.name.trim(),
@@ -496,13 +521,13 @@ export default function ClientManagerDashboard() {
         location: projectForm.location.trim(),
         startDate: projectForm.startDate,
         endDate: projectForm.endDate || null,
-        budget: Number(projectForm.budget),
+        budget: parsedBudget,
         imageUrl: primaryImage,
         imageUrls: cleanedImages,
         status: projectForm.status,
         progressPercentage: Number(projectForm.progressPercentage),
         constructionStatus: projectForm.constructionStatus,
-        priceRange: projectForm.priceRange.trim(),
+        priceRange: rawPrice || (parsedBudget > 0 ? formatMoney(parsedBudget) : ''),
         specifications: projectForm.specifications.trim(),
         marketingDesign: true,
         addedBy: 'CLIENT_MANAGER',
@@ -556,17 +581,34 @@ export default function ClientManagerDashboard() {
     }
   };
 
-  const handleRespondInquiry = async (e) => {
-    e.preventDefault();
-    if (!activeInquiry || !responseText.trim()) return;
+  const handleRespondInquiry = async (e, inquiryId = null, text = null) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const targetInquiryId = inquiryId || activeInquiry?.id;
+    const targetResponse = (text !== null ? text : responseText).trim();
+    if (!targetInquiryId || !targetResponse) return;
+
+    setSendingResponse(true);
     try {
-      await respondToInquiry(activeInquiry.id, responseText.trim(), 'Client Manager');
-      setSuccessMsg('Response sent and client notified!');
+      const responderName = user?.name || user?.username || 'Client Manager';
+      await respondToInquiry(targetInquiryId, targetResponse, responderName);
+      setSuccessMsg('Response sent successfully! Client has been notified.');
       setResponseModalOpen(false);
+      setInlineReplyingId(null);
+      setInlineReplyText('');
+      setResponseText('');
+      setActiveInquiry(null);
+
+      try {
+        localStorage.setItem('odiliya-inquiries-timestamp', String(Date.now()));
+        window.dispatchEvent(new CustomEvent('odiliya-inquiry-replied', { detail: { inquiryId: targetInquiryId } }));
+      } catch {}
+
       await loadAllData();
-      setTimeout(() => setSuccessMsg(''), 4000);
+      setTimeout(() => setSuccessMsg(''), 4500);
     } catch (err) {
       setError(err.message || 'Error responding to inquiry');
+    } finally {
+      setSendingResponse(false);
     }
   };
 
@@ -1492,89 +1534,284 @@ export default function ClientManagerDashboard() {
         {/* TAB 6: INQUIRIES */}
         {activeTab === 'inquiries' && (
           <div className="light-panel-card">
-            <div className="panel-card-head">
+            <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
-                <span className="brand-green-subtitle">SUPPORT</span>
-                <h3 className="panel-title">Client Inquiries Inbox</h3>
+                <span className="brand-green-subtitle">CLIENT SUPPORT &amp; INQUIRIES</span>
+                <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Client Inquiries Inbox</h3>
+                <p className="panel-meta" style={{ margin: 0 }}>Review customer inquiries, consult on designs, and dispatch official replies to client dashboards.</p>
               </div>
             </div>
 
-            {inquiries.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {inquiries.map((inq) => (
-                  <div
-                    key={inq.id}
-                    style={{
-                      background: '#f8fafc',
-                      border: inq.status === 'PENDING' ? '1px solid var(--brand-green)' : '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '1.5rem',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                      <div>
-                        <strong style={{ fontSize: '1.15rem', color: '#0f172a' }}>{inq.subject}</strong>
-                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.35rem', fontSize: '0.88rem' }}>
-                          <span style={{ color: 'var(--brand-green)', fontWeight: 700 }}>
-                            👤 Client Name: {inq.client?.name || 'Unknown'}
-                          </span>
-                          <span style={{ color: '#475569' }}>
-                            ✉️ {inq.client?.email || 'No email'}
-                          </span>
-                          {inq.client?.phone && (
-                            <span style={{ color: '#475569' }}>
-                              📞 {inq.client.phone}
-                            </span>
-                          )}
-                          {inq.project && (
-                            <span style={{ color: '#0369a1', fontWeight: 600 }}>
-                              🏠 Design: {inq.project.name}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem' }}>
-                        <span className={`pill-badge ${inq.status?.toLowerCase()}`}>
-                          {inq.status === 'ANSWERED' ? 'Answered' : 'Action Required'}
-                        </span>
-                        <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>
-                          📅 Date: {inq.createdAt ? formatDate(inq.createdAt) : '-'}
-                        </span>
-                      </div>
-                    </div>
+            {/* Inquiries Filter and Search bar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', margin: '1.25rem 0', background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className={inquiryFilter === 'ALL' ? 'btn-solid-green' : 'btn-outline-green'}
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.85rem' }}
+                  onClick={() => setInquiryFilter('ALL')}
+                >
+                  All Inquiries ({inquiries.length})
+                </button>
+                <button
+                  type="button"
+                  className={inquiryFilter === 'PENDING' ? 'btn-solid-green' : 'btn-outline-green'}
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.85rem' }}
+                  onClick={() => setInquiryFilter('PENDING')}
+                >
+                  Action Required ({inquiries.filter((i) => i.status === 'PENDING').length})
+                </button>
+                <button
+                  type="button"
+                  className={inquiryFilter === 'ANSWERED' ? 'btn-solid-green' : 'btn-outline-green'}
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.85rem' }}
+                  onClick={() => setInquiryFilter('ANSWERED')}
+                >
+                  Answered ({inquiries.filter((i) => i.status === 'ANSWERED').length})
+                </button>
+              </div>
 
-                    <p style={{ color: '#334155', fontSize: '0.95rem', margin: '0.75rem 0' }}>{inq.message}</p>
-                    {inq.attachmentData && (
-                      <a href={inq.attachmentData} download={inq.attachmentName || 'client-design'} className="btn-outline-green" style={{ display: 'inline-flex', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
-                        View client design: {inq.attachmentName || 'attachment'}
-                      </a>
-                    )}
+              <div style={{ minWidth: 260, flex: '1 1 260px', maxWidth: 360 }}>
+                <input
+                  type="text"
+                  placeholder="Search by client, email, or subject..."
+                  value={inquirySearch}
+                  onChange={(e) => setInquirySearch(e.target.value)}
+                  style={{ width: '100%', padding: '0.45rem 0.8rem', fontSize: '0.85rem', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                />
+              </div>
+            </div>
 
-                    {inq.response ? (
-                      <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', background: 'rgba(9, 84, 59, 0.08)', borderLeft: '4px solid var(--brand-green)', borderRadius: '0 6px 6px 0' }}>
-                        <small style={{ color: 'var(--brand-green)', fontWeight: 700 }}>Your Reply ({formatDate(inq.respondedAt)}):</small>
-                        <p style={{ color: '#0f172a', fontSize: '0.9rem', marginTop: '0.2rem' }}>{inq.response}</p>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn-solid-green"
-                        style={{ marginTop: '0.5rem' }}
-                        onClick={() => {
-                          setActiveInquiry(inq);
-                          setResponseText('');
-                          setResponseModalOpen(true);
+            {(() => {
+              const filteredInquiries = inquiries.filter((inq) => {
+                if (inquiryFilter === 'PENDING' && inq.status !== 'PENDING') return false;
+                if (inquiryFilter === 'ANSWERED' && inq.status !== 'ANSWERED') return false;
+                if (inquirySearch.trim()) {
+                  const q = inquirySearch.toLowerCase();
+                  const matchClient = inq.client?.name?.toLowerCase().includes(q) || inq.client?.email?.toLowerCase().includes(q);
+                  const matchSubject = inq.subject?.toLowerCase().includes(q);
+                  const matchMsg = inq.message?.toLowerCase().includes(q);
+                  if (!matchClient && !matchSubject && !matchMsg) return false;
+                }
+                return true;
+              });
+
+              if (filteredInquiries.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b' }}>
+                    <p style={{ margin: 0, fontSize: '1rem' }}>No client inquiries match the current filter.</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {filteredInquiries.map((inq) => {
+                    const isReplyingInline = inlineReplyingId === inq.id;
+                    return (
+                      <div
+                        key={inq.id}
+                        style={{
+                          background: '#ffffff',
+                          border: inq.status === 'PENDING' ? '1.5px solid #16a34a' : '1px solid #e2e8f0',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '1.5rem',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                         }}
                       >
-                        Reply to Client Inquiry
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted">No inquiries received.</p>
-            )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                          <div>
+                            <strong style={{ fontSize: '1.18rem', color: '#0f172a' }}>{inq.subject}</strong>
+                            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.35rem', fontSize: '0.88rem' }}>
+                              <span style={{ color: 'var(--brand-green)', fontWeight: 700 }}>
+                                👤 Client: {inq.client?.name || 'Unknown'}
+                              </span>
+                              <span style={{ color: '#475569' }}>
+                                ✉️ <a href={`mailto:${inq.client?.email}`} style={{ color: '#2563eb' }}>{inq.client?.email || 'No email'}</a>
+                              </span>
+                              {inq.client?.phone && (
+                                <span style={{ color: '#475569' }}>
+                                  📞 <a href={`tel:${inq.client.phone}`} style={{ color: '#475569' }}>{inq.client.phone}</a>
+                                </span>
+                              )}
+                              {inq.project && (
+                                <span style={{ color: '#0369a1', fontWeight: 600 }}>
+                                  🏠 Design: {inq.project.name}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem' }}>
+                            <span className={`pill-badge ${inq.status?.toLowerCase()}`} style={{
+                              background: inq.status === 'ANSWERED' ? '#dcfce7' : '#fef3c7',
+                              color: inq.status === 'ANSWERED' ? '#15803d' : '#b45309',
+                              fontWeight: 700,
+                              fontSize: '0.78rem',
+                              border: `1px solid ${inq.status === 'ANSWERED' ? '#bbf7d0' : '#fde68a'}`,
+                              padding: '0.3rem 0.75rem'
+                            }}>
+                              {inq.status === 'ANSWERED' ? '✓ Answered' : 'Action Required'}
+                            </span>
+                            <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>
+                              📅 {inq.createdAt ? formatDate(inq.createdAt) : '-'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ background: '#f8fafc', padding: '1rem 1.15rem', borderRadius: 8, border: '1px solid #f1f5f9', margin: '0.75rem 0' }}>
+                          <p style={{ color: '#334155', fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                            {inq.message}
+                          </p>
+                        </div>
+
+                        {inq.attachmentData && (
+                          <div style={{ marginBottom: '0.75rem' }}>
+                            <a href={inq.attachmentData} download={inq.attachmentName || 'client-attachment'} className="btn-outline-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}>
+                              📎 Download Client Attachment: {inq.attachmentName || 'attachment'}
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Existing Official Response */}
+                        {inq.response && (
+                          <div style={{
+                            marginTop: '0.85rem',
+                            marginBottom: '0.85rem',
+                            padding: '1rem 1.25rem',
+                            background: '#f0fdf4',
+                            border: '1px solid #bbf7d0',
+                            borderLeft: '4px solid #16a34a',
+                            borderRadius: '0 8px 8px 0'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                              <small style={{ color: '#15803d', fontWeight: 700, fontSize: '0.85rem' }}>
+                                ✓ Your Reply ({formatDate(inq.respondedAt)} by {inq.respondedBy || 'Client Manager'}):
+                              </small>
+                            </div>
+                            <p style={{ color: '#0f172a', fontSize: '0.92rem', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                              {inq.response}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Inline Reply Composer */}
+                        {isReplyingInline ? (
+                          <div style={{
+                            marginTop: '1rem',
+                            background: '#f8fafc',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 8,
+                            padding: '1rem',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                              <strong style={{ fontSize: '0.88rem', color: '#0f172a' }}>
+                                Compose Reply to {inq.client?.name || 'Client'}
+                              </strong>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInlineReplyingId(null);
+                                  setInlineReplyText('');
+                                }}
+                                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.85rem' }}
+                              >
+                                Cancel ✕
+                              </button>
+                            </div>
+
+                            {/* Quick template chips */}
+                            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.65rem' }}>
+                              <button
+                                type="button"
+                                className="btn-outline-green"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                                onClick={() => setInlineReplyText("Thank you for reaching out to Odiliya Homes. We have received your inquiry and our team will schedule a detailed consultation session with you shortly.")}
+                              >
+                                📅 Consultation
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-outline-green"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                                onClick={() => setInlineReplyText("Thank you for your inquiry. We are reviewing your project specifications and will prepare a customized quotation within 2 business days.")}
+                              >
+                                💰 Quotation
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-outline-green"
+                                style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                                onClick={() => setInlineReplyText("We would be delighted to arrange a site inspection and showroom visit at your convenience. Please let us know your preferred date and time.")}
+                              >
+                                🏡 Site Visit
+                              </button>
+                            </div>
+
+                            <textarea
+                              rows={4}
+                              placeholder="Write your official response to the client..."
+                              value={inlineReplyText}
+                              onChange={(e) => setInlineReplyText(e.target.value)}
+                              style={{ width: '100%', padding: '0.65rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.9rem', boxSizing: 'border-box' }}
+                            />
+
+                            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+                              <button
+                                type="button"
+                                className="btn-outline-green"
+                                style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }}
+                                onClick={() => {
+                                  setInlineReplyingId(null);
+                                  setInlineReplyText('');
+                                }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-solid-green"
+                                style={{ padding: '0.35rem 1.25rem', fontSize: '0.82rem' }}
+                                disabled={sendingResponse || !inlineReplyText.trim()}
+                                onClick={(e) => handleRespondInquiry(e, inq.id, inlineReplyText)}
+                              >
+                                {sendingResponse ? 'Sending Reply...' : 'Send Reply →'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn-solid-green"
+                              style={{ fontSize: '0.82rem', padding: '0.38rem 0.95rem' }}
+                              onClick={() => {
+                                setActiveInquiry(inq);
+                                setResponseText(inq.response || '');
+                                setResponseModalOpen(true);
+                              }}
+                            >
+                              {inq.response ? '✏️ Edit / Update Reply' : '💬 Reply to Client Inquiry'}
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn-outline-green"
+                              style={{ fontSize: '0.82rem', padding: '0.38rem 0.95rem' }}
+                              onClick={() => {
+                                setInlineReplyingId(inq.id);
+                                setInlineReplyText(inq.response || '');
+                              }}
+                            >
+                              Fast Inline Reply
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1680,32 +1917,35 @@ export default function ClientManagerDashboard() {
                 </strong>
               </div>
               <div className="pm-metric">
-                <span>Confirmed Payments</span>
+                <span>Card Payments</span>
                 <strong style={{ color: '#15803d' }}>
-                  {downPayments.filter(p => p.status === 'Valid' || p.status === 'Verified' || p.status === 'Approved').length}
+                  {downPayments.filter(isCardPayment).length}
                 </strong>
+                <small style={{ color: '#16a34a', fontWeight: 600, fontSize: '0.75rem', marginTop: 2 }}>Payment Successful</small>
               </div>
               <div className="pm-metric">
-                <span>Total Transactions</span>
+                <span>Bank Transfers</span>
                 <strong style={{ color: '#0369a1' }}>
-                  {downPayments.length}
+                  {downPayments.filter(isBankPayment).length}
                 </strong>
+                <small style={{ color: '#0284c7', fontWeight: 600, fontSize: '0.75rem', marginTop: 2 }}>Manual Slips</small>
               </div>
               <div className="pm-metric">
                 <span>Pending Verification</span>
                 <strong style={{ color: '#b45309' }}>
-                  {downPayments.filter(p => p.status === 'Pending').length}
+                  {downPayments.filter(p => isBankPayment(p) && (p.status || '').toLowerCase() === 'pending').length}
                 </strong>
+                <small style={{ color: '#d97706', fontWeight: 600, fontSize: '0.75rem', marginTop: 2 }}>Requires Review</small>
               </div>
             </section>
 
             {/* Main Table Panel */}
             <div className="light-panel-card">
-              <div className="panel-card-head">
+              <div className="panel-card-head" style={{ marginBottom: '1.25rem' }}>
                 <div>
                   <span className="brand-green-subtitle">PAYMENT MANAGEMENT</span>
                   <h3 className="panel-title">Project Payment Records</h3>
-                  <p className="panel-meta">Track all client payment transactions across construction projects.</p>
+                  <p className="panel-meta">Track all client payment transactions across construction projects separated by Card and Bank Transfer.</p>
                 </div>
                 <button
                   type="button"
@@ -1713,6 +1953,81 @@ export default function ClientManagerDashboard() {
                   onClick={() => openAddPayment()}
                 >
                   + Record Payment
+                </button>
+              </div>
+
+              {/* Payment Section Switcher (All Payments vs Card Payments vs Bank Transfers) */}
+              <div style={{
+                display: 'flex',
+                gap: '0.65rem',
+                marginBottom: '1.5rem',
+                borderBottom: '2px solid #e2e8f0',
+                paddingBottom: '0.75rem',
+                flexWrap: 'wrap'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setPaymentSectionTab('ALL')}
+                  style={{
+                    padding: '0.55rem 1.25rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    background: paymentSectionTab === 'ALL' ? 'var(--brand-green)' : '#f1f5f9',
+                    color: paymentSectionTab === 'ALL' ? '#ffffff' : '#475569',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  All Transactions ({downPayments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentSectionTab('CARD')}
+                  style={{
+                    padding: '0.55rem 1.25rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    background: paymentSectionTab === 'CARD' ? 'var(--brand-green)' : '#f1f5f9',
+                    color: paymentSectionTab === 'CARD' ? '#ffffff' : '#475569',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Card Payments ({downPayments.filter(isCardPayment).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentSectionTab('BANK')}
+                  style={{
+                    padding: '0.55rem 1.25rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    background: paymentSectionTab === 'BANK' ? 'var(--brand-green)' : '#f1f5f9',
+                    color: paymentSectionTab === 'BANK' ? '#ffffff' : '#475569',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Online Bank Transfers ({downPayments.filter(isBankPayment).length})
+                  {downPayments.filter(p => isBankPayment(p) && (p.status || '').toLowerCase() === 'pending').length > 0 && (
+                    <span style={{
+                      marginLeft: 8,
+                      background: '#f59e0b',
+                      color: '#ffffff',
+                      padding: '2px 7px',
+                      borderRadius: 12,
+                      fontSize: '0.74rem',
+                      fontWeight: 800
+                    }}>
+                      {downPayments.filter(p => isBankPayment(p) && (p.status || '').toLowerCase() === 'pending').length} Pending Review
+                    </span>
+                  )}
                 </button>
               </div>
 
@@ -1736,9 +2051,10 @@ export default function ClientManagerDashboard() {
                   >
                     <option value="">All Statuses</option>
                     <option value="Valid">Confirmed</option>
-                    <option value="Verified">Verified</option>
                     <option value="Approved">Approved</option>
+                    <option value="Verified">Verified</option>
                     <option value="Pending">Pending</option>
+                    <option value="Rejected">Rejected</option>
                   </select>
                 </div>
 
@@ -1772,124 +2088,179 @@ export default function ClientManagerDashboard() {
               </div>
 
               {/* Table */}
-              {downPayments.length > 0 ? (
-                <div className="table-responsive-box">
-                  <table className="light-table">
-                    <thead>
-                      <tr>
-                        <th>Reference #</th>
-                        <th>Client</th>
-                        <th>Project</th>
-                        <th>Amount</th>
-                        <th>Payment Date</th>
-                        <th>Method</th>
-                        <th>Receipt</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {downPayments.map((p) => {
-                        return (
-                          <tr key={p.id}>
-                            <td>
-                              <strong>{p.referenceNumber || `PAY-${p.id}`}</strong>
-                              <small style={{ display: 'block', color: 'var(--text-muted)' }}>ID #{p.id}</small>
-                            </td>
-                            <td>
-                              <strong>{p.client?.name}</strong>
-                              <small style={{ display: 'block', color: 'var(--text-muted)' }}>{p.client?.phone || p.client?.email}</small>
-                            </td>
-                            <td>
-                              {p.project ? (
-                                <div>
-                                  <strong>{p.project.name}</strong>
-                                  <small style={{ display: 'block', color: 'var(--brand-green)' }}>{p.project.location || p.project.category}</small>
+              {(() => {
+                const filteredPayments = downPayments.filter((p) => {
+                  if (paymentSectionTab === 'CARD' && !isCardPayment(p)) return false;
+                  if (paymentSectionTab === 'BANK' && !isBankPayment(p)) return false;
+                  return true;
+                });
+
+                if (filteredPayments.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#64748b' }}>
+                      <p style={{ fontWeight: 600, fontSize: '1.05rem', margin: '0 0 0.5rem' }}>No payment records found.</p>
+                      <p style={{ fontSize: '0.85rem', margin: 0 }}>
+                        {paymentSectionTab === 'CARD' ? 'No card payments matching current filters.' : paymentSectionTab === 'BANK' ? 'No bank transfer payments matching current filters.' : 'No downpayments found matching the criteria.'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="table-responsive-box">
+                    <table className="light-table">
+                      <thead>
+                        <tr>
+                          <th>Reference #</th>
+                          <th>Client</th>
+                          <th>Project</th>
+                          <th>Amount</th>
+                          <th>Payment Date</th>
+                          <th>Method</th>
+                          <th>Receipt</th>
+                          <th>STATUS</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredPayments.map((p) => {
+                          const isCard = isCardPayment(p);
+                          return (
+                            <tr key={p.id}>
+                              <td>
+                                <strong>{p.referenceNumber || `PAY-${p.id}`}</strong>
+                                <small style={{ display: 'block', color: 'var(--text-muted)' }}>ID #{p.id}</small>
+                              </td>
+                              <td>
+                                <strong>{p.client?.name}</strong>
+                                <small style={{ display: 'block', color: 'var(--text-muted)' }}>{p.client?.phone || p.client?.email}</small>
+                              </td>
+                              <td>
+                                {p.project ? (
+                                  <div>
+                                    <strong>{p.project.name}</strong>
+                                    <small style={{ display: 'block', color: 'var(--brand-green)' }}>{p.project.location || p.project.category}</small>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted">Unassigned</span>
+                                )}
+                              </td>
+                              <td>
+                                <strong style={{ color: 'var(--brand-green)', fontSize: '1rem' }}>
+                                  {formatMoney(p.amount)}
+                                </strong>
+                              </td>
+                              <td>{formatDate(p.paymentDate)}</td>
+                              <td>
+                                <span className="pill-badge active" style={{ fontSize: '0.72rem' }}>
+                                  {p.paymentMethod?.replace('_', ' ')}
+                                </span>
+                              </td>
+                              <td>
+                                {p.receipt ? (
+                                  <button
+                                    type="button"
+                                    className="btn-outline-green"
+                                    style={{ padding: '0.2rem 0.55rem', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                                    onClick={() => setReceiptPreviewModal(p)}
+                                  >
+                                    View Receipt
+                                  </button>
+                                ) : (
+                                  <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                                    {isCard ? 'Digital Gateway' : 'None'}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {isCard ? (
+                                  <span style={{
+                                    background: '#dcfce7',
+                                    color: '#15803d',
+                                    padding: '0.35rem 0.8rem',
+                                    borderRadius: '20px',
+                                    fontWeight: 700,
+                                    fontSize: '0.78rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    border: '1px solid #bbf7d0',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    Payment Successful
+                                  </span>
+                                ) : (
+                                  <span style={{
+                                    background:
+                                      p.status === 'Approved' || p.status === 'Verified' || p.status === 'Valid' ? '#dcfce7' :
+                                      p.status === 'Rejected' ? '#fee2e2' : '#fef3c7',
+                                    color:
+                                      p.status === 'Approved' || p.status === 'Verified' || p.status === 'Valid' ? '#15803d' :
+                                      p.status === 'Rejected' ? '#b91c1c' : '#b45309',
+                                    padding: '0.35rem 0.75rem',
+                                    borderRadius: '20px',
+                                    fontWeight: 700,
+                                    fontSize: '0.78rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    border: `1px solid ${
+                                      p.status === 'Approved' || p.status === 'Verified' || p.status === 'Valid' ? '#bbf7d0' :
+                                      p.status === 'Rejected' ? '#fca5a5' : '#fde68a'
+                                    }`,
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {p.status === 'Pending' ? 'Pending Review' : (p.status === 'Rejected' ? 'Rejected' : 'Approved')}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                  {!isCard ? (
+                                    <>
+                                      {p.status !== 'Approved' && p.status !== 'Verified' && (
+                                        <button
+                                          type="button"
+                                          className="btn-solid-green"
+                                          style={{ padding: '0.28rem 0.65rem', fontSize: '0.74rem', background: '#16a34a', whiteSpace: 'nowrap' }}
+                                          onClick={() => handleUpdateDownPaymentStatus(p.id, 'Approved')}
+                                          title="Approve this bank transfer"
+                                        >
+                                          Approve
+                                        </button>
+                                      )}
+                                      {p.status !== 'Rejected' && (
+                                        <button
+                                          type="button"
+                                          style={{
+                                            padding: '0.28rem 0.65rem',
+                                            fontSize: '0.74rem',
+                                            background: '#dc2626',
+                                            color: '#ffffff',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                          onClick={() => handleUpdateDownPaymentStatus(p.id, 'Rejected')}
+                                          title="Reject this bank transfer"
+                                        >
+                                          Reject
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '0.85rem', fontWeight: 600 }}>—</span>
+                                  )}
                                 </div>
-                              ) : (
-                                <span className="text-muted">Unassigned</span>
-                              )}
-                            </td>
-                            <td>
-                              <strong style={{ color: 'var(--brand-green)', fontSize: '1rem' }}>
-                                {formatMoney(p.amount)}
-                              </strong>
-                            </td>
-                            <td>{formatDate(p.paymentDate)}</td>
-                            <td>
-                              <span className="pill-badge active" style={{ fontSize: '0.72rem' }}>
-                                {p.paymentMethod?.replace('_', ' ')}
-                              </span>
-                            </td>
-                            <td>
-                              {p.receipt ? (
-                                <button
-                                  type="button"
-                                  className="btn-outline-green"
-                                  style={{ padding: '0.2rem 0.55rem', fontSize: '0.75rem' }}
-                                  onClick={() => setReceiptPreviewModal(p)}
-                                >
-                                  View Receipt
-                                </button>
-                              ) : (
-                                <span className="text-muted" style={{ fontSize: '0.8rem' }}>None</span>
-                              )}
-                            </td>
-                            <td>
-                              <select
-                                value={p.status || 'Valid'}
-                                onChange={(e) => handleUpdateDownPaymentStatus(p.id, e.target.value)}
-                                style={{
-                                  padding: '0.3rem 0.5rem',
-                                  borderRadius: '6px',
-                                  border: '1px solid #cbd5e1',
-                                  fontWeight: 600,
-                                  fontSize: '0.78rem',
-                                  cursor: 'pointer',
-                                  background:
-                                    p.status === 'Verified' || p.status === 'Approved' || p.status === 'Valid' ? '#dcfce7' :
-                                    p.status === 'Pending' ? '#fef3c7' : '#fee2e2',
-                                  color:
-                                    p.status === 'Verified' || p.status === 'Approved' || p.status === 'Valid' ? '#15803d' :
-                                    p.status === 'Pending' ? '#b45309' : '#b91c1c',
-                                }}
-                                title="Change payment status"
-                              >
-                                <option value="Valid">Confirmed</option>
-                                <option value="Verified">Verified</option>
-                                <option value="Approved">Approved</option>
-                                <option value="Pending">Pending</option>
-                              </select>
-                            </td>
-                            <td>
-                              <div style={{ display: 'flex', gap: '0.35rem' }}>
-                                <button
-                                  type="button"
-                                  className="btn-outline-green"
-                                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.72rem' }}
-                                  onClick={() => openEditPayment(p)}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn-outline-green"
-                                  style={{ padding: '0.25rem 0.55rem', fontSize: '0.72rem', borderColor: '#ef4444', color: '#ef4444' }}
-                                  onClick={() => handleDeletePayment(p)}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-muted">No downpayments found matching the criteria.</p>
-              )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -2424,12 +2795,13 @@ export default function ClientManagerDashboard() {
                       <input type="date" value={projectForm.startDate} onChange={(e) => setProjectForm({ ...projectForm, startDate: e.target.value })} required />
                     </div>
                     <div className="form-input-box">
-                      <label>Starting Price / Budget *</label>
-                      <input type="number" min="0" value={projectForm.budget} onChange={(e) => setProjectForm({ ...projectForm, budget: e.target.value })} required />
-                    </div>
-                    <div className="form-input-box">
-                      <label>Display Price</label>
-                      <input placeholder="e.g. From LKR 25,000,000" value={projectForm.priceRange} onChange={(e) => setProjectForm({ ...projectForm, priceRange: e.target.value })} />
+                      <label>Display Price *</label>
+                      <input
+                        placeholder="e.g. From LKR 25,000,000"
+                        value={projectForm.priceRange}
+                        onChange={(e) => setProjectForm({ ...projectForm, priceRange: e.target.value })}
+                        required
+                      />
                     </div>
                     <div className="form-input-box">
                       <label>Expected Completion</label>
@@ -2499,26 +2871,6 @@ export default function ClientManagerDashboard() {
                           onChange={handleDesignImageUpload}
                         />
                       </label>
-
-                      <div style={{ display: 'flex', gap: '0.4rem', flex: 1, minWidth: '240px' }}>
-                        <input
-                          type="url"
-                          placeholder="Or paste image URL (https://...)"
-                          value={newImageUrl}
-                          onChange={(e) => setNewImageUrl(e.target.value)}
-                          disabled={(projectForm.imageUrls?.length || 0) >= 5}
-                          style={{ flex: 1, fontSize: '0.82rem', padding: '0.45rem 0.7rem' }}
-                        />
-                        <button
-                          type="button"
-                          className="btn-outline-green"
-                          onClick={handleAddImageUrl}
-                          disabled={!newImageUrl.trim() || (projectForm.imageUrls?.length || 0) >= 5}
-                          style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
-                        >
-                          + Add URL
-                        </button>
-                      </div>
                     </div>
 
                     {/* Previews Grid: 5 slots */}
@@ -2697,28 +3049,79 @@ export default function ClientManagerDashboard() {
 
         {responseModalOpen && activeInquiry && (
           <div className="light-modal-overlay">
-            <div className="light-modal-box">
+            <div className="light-modal-box" style={{ maxWidth: '640px' }}>
               <div className="modal-head-row">
-                <h3>Respond to Client Inquiry (US-CM-15)</h3>
+                <h3 style={{ margin: 0, color: '#0f172a' }}>Reply to Client Inquiry</h3>
                 <button type="button" onClick={() => setResponseModalOpen(false)}>✕</button>
               </div>
-              <form onSubmit={handleRespondInquiry}>
+              <form onSubmit={(e) => handleRespondInquiry(e)}>
                 <div className="modal-body-content">
-                  <p style={{ color: 'var(--brand-green)', fontWeight: 600 }}>
-                    From: {activeInquiry.client?.name} | Subject: {activeInquiry.subject}
-                  </p>
-                  <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: 'var(--radius-sm)', margin: '1rem 0' }}>
-                    <small style={{ color: 'var(--text-muted)' }}>Client Inquiry:</small>
-                    <p style={{ color: '#0f172a', marginTop: '0.25rem' }}>{activeInquiry.message}</p>
+                  <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <strong style={{ color: 'var(--brand-green)', fontSize: '0.95rem' }}>
+                        👤 {activeInquiry.client?.name || 'Client'} ({activeInquiry.client?.email || 'No email'})
+                      </strong>
+                      <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                        {activeInquiry.createdAt ? formatDate(activeInquiry.createdAt) : ''}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '0.3rem', fontSize: '0.95rem' }}>
+                      Subject: {activeInquiry.subject}
+                    </div>
+                    <p style={{ color: '#475569', fontSize: '0.9rem', margin: 0, whiteSpace: 'pre-wrap' }}>
+                      {activeInquiry.message}
+                    </p>
                   </div>
+
+                  {/* Quick Response Templates */}
+                  <div style={{ marginBottom: '1rem' }}>
+                    <small style={{ color: '#64748b', fontWeight: 600, display: 'block', marginBottom: '0.4rem' }}>
+                      Insert Quick Response Template:
+                    </small>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn-outline-green"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                        onClick={() => setResponseText("Thank you for reaching out to Odiliya Homes. We have received your inquiry and our team will schedule a detailed consultation session with you shortly.")}
+                      >
+                        📅 Consultation
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-outline-green"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                        onClick={() => setResponseText("Thank you for your inquiry. We are reviewing your project specifications and will prepare a customized quotation within 2 business days.")}
+                      >
+                        💰 Quotation
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-outline-green"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                        onClick={() => setResponseText("We would be delighted to arrange a site inspection and showroom visit at your convenience. Please let us know your preferred date and time.")}
+                      >
+                        🏡 Site Visit
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="form-input-box">
                     <label>Your Official Response *</label>
-                    <textarea rows={4} value={responseText} onChange={(e) => setResponseText(e.target.value)} required />
+                    <textarea
+                      rows={5}
+                      placeholder="Type your response to the client..."
+                      value={responseText}
+                      onChange={(e) => setResponseText(e.target.value)}
+                      required
+                    />
                   </div>
                 </div>
                 <div className="modal-actions-row">
                   <button type="button" className="btn-outline-green" onClick={() => setResponseModalOpen(false)}>Cancel</button>
-                  <button type="submit" className="btn-solid-green">Send Response</button>
+                  <button type="submit" className="btn-solid-green" disabled={sendingResponse}>
+                    {sendingResponse ? 'Sending Response...' : 'Send Official Response'}
+                  </button>
                 </div>
               </form>
             </div>
