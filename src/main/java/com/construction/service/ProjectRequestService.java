@@ -9,6 +9,7 @@ import com.construction.model.Project;
 import com.construction.model.ProjectRequest;
 import com.construction.repository.ClientNotificationRepository;
 import com.construction.repository.ClientRepository;
+import com.construction.repository.DesignRepository;
 import com.construction.repository.ProjectRepository;
 import com.construction.repository.ProjectRequestRepository;
 import org.springframework.stereotype.Service;
@@ -28,15 +29,18 @@ public class ProjectRequestService {
     private final ClientRepository clientRepository;
     private final ProjectRepository projectRepository;
     private final ClientNotificationRepository notificationRepository;
+    private final DesignRepository designRepository;
 
     public ProjectRequestService(ProjectRequestRepository projectRequestRepository,
                                  ClientRepository clientRepository,
                                  ProjectRepository projectRepository,
-                                 ClientNotificationRepository notificationRepository) {
+                                 ClientNotificationRepository notificationRepository,
+                                 DesignRepository designRepository) {
         this.projectRequestRepository = projectRequestRepository;
         this.clientRepository = clientRepository;
         this.projectRepository = projectRepository;
         this.notificationRepository = notificationRepository;
+        this.designRepository = designRepository;
     }
 
     public ProjectRequest create(ProjectRequest request) {
@@ -67,7 +71,9 @@ public class ProjectRequestService {
         }
 
         if (request.getSelectedDesign() != null && request.getSelectedDesign().getId() != null) {
-            request.setSelectedDesign(projectRepository.findById(request.getSelectedDesign().getId()).orElse(null));
+            request.setSelectedDesign(designRepository.findById(request.getSelectedDesign().getId()).orElse(null));
+        } else {
+            request.setSelectedDesign(null);
         }
 
         if (request.getImageUrls() != null && request.getImageUrls().size() > 5) {

@@ -1,6 +1,7 @@
 package com.construction.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -9,11 +10,17 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "client_inquiries")
@@ -62,7 +69,43 @@ public class ClientInquiry {
 
     private String respondedBy;
 
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "design_id")
+    private Design design;
+
+    /** Who started the conversation: "CLIENT" (default) or "CLIENT_MANAGER". */
+    @Column(length = 30)
+    private String initiatedBy = "CLIENT";
+
+    @OneToMany(mappedBy = "inquiry", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @Fetch(FetchMode.SUBSELECT)
+    @OrderBy("createdAt ASC, id ASC")
+    @JsonIgnoreProperties({"inquiry"})
+    private List<InquiryMessage> messages = new ArrayList<>();
+
     public ClientInquiry() {
+    }
+
+    public Design getDesign() { return design; }
+    public void setDesign(Design design) { this.design = design; }
+
+    public String getInitiatedBy() { return initiatedBy == null ? "CLIENT" : initiatedBy; }
+    public void setInitiatedBy(String initiatedBy) { this.initiatedBy = initiatedBy; }
+
+    public List<InquiryMessage> getMessages() {
+        if (messages == null) {
+            messages = new ArrayList<>();
+        }
+        return messages;
+    }
+
+    public void setMessages(List<InquiryMessage> messages) {
+        // Messages are managed through addMessage(); ignore client-supplied lists.
+    }
+
+    public void addMessage(InquiryMessage message) {
+        message.setInquiry(this);
+        getMessages().add(message);
     }
 
     public Long getId() {

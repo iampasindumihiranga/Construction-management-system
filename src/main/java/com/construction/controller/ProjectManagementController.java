@@ -23,7 +23,7 @@ public class ProjectManagementController {
     @GetMapping("/tasks") public List<ProjectTask> tasks(@RequestParam(required = false) Long projectId, @RequestParam(required = false) Long employeeId) { return service.tasks(projectId, employeeId); }
     @PostMapping("/tasks") public ResponseEntity<ProjectTask> createTask(@Valid @RequestBody ProjectTask task) { return ResponseEntity.status(HttpStatus.CREATED).body(service.createTask(task)); }
     @PutMapping("/tasks/{id}") public ProjectTask updateTask(@PathVariable Long id, @Valid @RequestBody ProjectTask task) { return service.updateTask(id, task); }
-    @PatchMapping("/tasks/{id}/progress")
+    @RequestMapping(value = "/tasks/{id}/progress", method = {RequestMethod.PATCH, RequestMethod.PUT, RequestMethod.POST})
     public ProjectTask updateTaskProgress(
             @PathVariable Long id,
             @RequestBody Map<String, Object> payload) {

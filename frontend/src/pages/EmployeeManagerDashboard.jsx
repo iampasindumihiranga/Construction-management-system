@@ -420,27 +420,31 @@ export default function EmployeeManagerDashboard() {
 
   const submitAttendance = async (e) => {
     e.preventDefault();
+    if (selectedDate !== today) {
+      fail(new Error(`Attendance can only be marked for today (${formatDate(today)}). Previous and upcoming dates cannot be marked.`));
+      return;
+    }
     if (!validateAttendance()) {
       setError('Please correct the attendance validation errors.');
       return;
     }
     const alreadyMarked = attendanceList.find((a) => a.employee?.id === Number(attendanceForm.employeeId));
     if (alreadyMarked) {
-      fail(new Error(`Attendance for this employee is already marked for ${formatDate(selectedDate)}. In attendance, records can only be marked once and cannot be changed.`));
+      fail(new Error(`Attendance for this employee is already marked for today (${formatDate(today)}). In attendance, records can only be marked once and cannot be changed.`));
       return;
     }
     try {
       await recordAttendance({
         employeeId: Number(attendanceForm.employeeId),
         employee: { id: Number(attendanceForm.employeeId) },
-        date: selectedDate,
+        date: today,
         status: attendanceForm.status,
         checkInTime: ['PRESENT', 'LATE', 'HALF_DAY'].includes(attendanceForm.status) ? attendanceForm.checkInTime : null,
         checkOutTime: ['PRESENT', 'HALF_DAY'].includes(attendanceForm.status) ? attendanceForm.checkOutTime : null,
         remarks: attendanceForm.remarks,
         recordedBy: 'Employee Manager',
       });
-      report(`Attendance marked as ${attendanceForm.status} for selected employee on ${formatDate(selectedDate)}.`);
+      report(`Attendance marked as ${attendanceForm.status} for selected employee on today (${formatDate(today)}).`);
       setAttendanceForm({
         employeeId: '',
         status: 'PRESENT',
@@ -457,9 +461,13 @@ export default function EmployeeManagerDashboard() {
 
   const quickMarkAttendance = async (empId, status, empName = '', customRemarks = '') => {
     try {
+      if (selectedDate !== today) {
+        fail(new Error(`Attendance can only be marked for today (${formatDate(today)}). Previous and upcoming dates cannot be marked.`));
+        return;
+      }
       const existing = attendanceList.find((a) => a.employee?.id === empId);
       if (existing) {
-        fail(new Error(`Attendance for ${empName || 'this employee'} is already marked and locked for ${formatDate(selectedDate)}. In attendance, records can only be marked once and cannot be changed.`));
+        fail(new Error(`Attendance for ${empName || 'this employee'} is already marked and locked for today (${formatDate(today)}). In attendance, records can only be marked once and cannot be changed.`));
         return;
       }
 
@@ -474,14 +482,14 @@ export default function EmployeeManagerDashboard() {
       await recordAttendance({
         employeeId: empId,
         employee: { id: empId },
-        date: selectedDate,
+        date: today,
         status: status,
         checkInTime: inTime,
         checkOutTime: outTime,
         remarks: customRemarks || (status === 'ABSENT' ? 'Recorded as Absent' : `Marked as ${status}`),
         recordedBy: 'Employee Manager',
       });
-      report(`Attendance for ${empName || 'employee'} marked as ${status} on ${formatDate(selectedDate)}.`);
+      report(`Attendance for ${empName || 'employee'} marked as ${status} on today (${formatDate(today)}).`);
       await refreshData();
     } catch (err) {
       fail(err);
@@ -490,21 +498,29 @@ export default function EmployeeManagerDashboard() {
 
   const handleStatusChange = async (emp, newStatus) => {
     if (!newStatus) return;
+    if (selectedDate !== today) {
+      fail(new Error(`Attendance can only be marked for today (${formatDate(today)}). Previous and upcoming dates cannot be marked.`));
+      return;
+    }
     const existing = attendanceList.find((a) => a.employee?.id === emp.id);
     if (existing) {
-      fail(new Error(`Attendance for ${emp.name} is already marked and locked for ${formatDate(selectedDate)}. In attendance, records can only be marked once and cannot be changed.`));
+      fail(new Error(`Attendance for ${emp.name} is already marked and locked for today (${formatDate(today)}). In attendance, records can only be marked once and cannot be changed.`));
       return;
     }
     await quickMarkAttendance(emp.id, newStatus, emp.name);
   };
 
   const markAllUnmarkedPresent = async () => {
-    const unmarked = employees.filter((emp) => !attendanceList.some((a) => a.employee?.id === emp.id));
-    if (unmarked.length === 0) {
-      report('All employees are already marked for this date.');
+    if (selectedDate !== today) {
+      fail(new Error(`Attendance can only be marked for today (${formatDate(today)}). Previous and upcoming dates cannot be marked.`));
       return;
     }
-    if (!window.confirm(`Mark all ${unmarked.length} remaining unmarked employee(s) as Present for ${formatDate(selectedDate)}? (Note: Once marked, attendance is permanent and cannot be changed.)`)) {
+    const unmarked = employees.filter((emp) => !attendanceList.some((a) => a.employee?.id === emp.id));
+    if (unmarked.length === 0) {
+      report('All employees are already marked for today.');
+      return;
+    }
+    if (!window.confirm(`Mark all ${unmarked.length} remaining unmarked employee(s) as Present for today (${formatDate(today)})? (Note: Once marked, attendance is permanent and cannot be changed.)`)) {
       return;
     }
     try {
@@ -514,7 +530,7 @@ export default function EmployeeManagerDashboard() {
           recordAttendance({
             employeeId: emp.id,
             employee: { id: emp.id },
-            date: selectedDate,
+            date: today,
             status: 'PRESENT',
             checkInTime: '08:00',
             checkOutTime: '17:00',
@@ -523,7 +539,7 @@ export default function EmployeeManagerDashboard() {
           })
         )
       );
-      report(`Successfully marked ${unmarked.length} staff member(s) as Present.`);
+      report(`Successfully marked ${unmarked.length} staff member(s) as Present for today.`);
       await refreshData();
     } catch (err) {
       fail(err);
@@ -1410,7 +1426,10 @@ export default function EmployeeManagerDashboard() {
                 <div style={{ display: 'inline-flex', background: '#f3f4f6', padding: '4px', borderRadius: '10px', gap: '4px' }}>
                   <button
                     type="button"
-                    onClick={() => setAttSubTab('markTable')}
+                    onClick={() => {
+                      setAttSubTab('markTable');
+                      setSelectedDate(today);
+                    }}
                     style={{
                       padding: '8px 16px',
                       borderRadius: '8px',
@@ -1425,7 +1444,7 @@ export default function EmployeeManagerDashboard() {
                       gap: '6px',
                     }}
                   >
-                    <span>📝</span> Daily Marking Register Table
+                    <span>📝</span> Today's Marking Register
                   </button>
                   <button
                     type="button"
@@ -1459,65 +1478,57 @@ export default function EmployeeManagerDashboard() {
                 </div>
               </div>
 
-              {/* Date Navigation Bar (always accessible) */}
+              {/* Date Information Bar */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', paddingTop: '16px', borderTop: '1px solid #f3f4f6' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#374151' }}>Selected Date:</span>
-                  <button
-                    type="button"
-                    onClick={() => shiftSelectedDate(-1)}
-                    style={{ padding: '6px 12px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}
-                    title="Previous Day"
-                  >
-                    &larr; Prev Day
-                  </button>
-                  <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => {
-                      if (e.target.value) setSelectedDate(e.target.value);
-                    }}
-                    style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #047857', fontWeight: 700, color: '#111827', fontSize: '0.9rem' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => shiftSelectedDate(1)}
-                    style={{ padding: '6px 12px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}
-                    title="Next Day"
-                  >
-                    Next Day &rarr;
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDate(today)}
-                    style={{
-                      padding: '6px 12px',
-                      background: selectedDate === today ? '#ecfdf5' : '#f3f4f6',
-                      border: `1px solid ${selectedDate === today ? '#86efac' : '#d1d5db'}`,
-                      color: selectedDate === today ? '#047857' : '#374151',
-                      borderRadius: '6px',
-                      fontSize: '0.82rem',
+                {attSubTab === 'markTable' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', width: '100%' }}>
+                    <span style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      fontSize: '0.88rem',
                       fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Today
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{
-                    padding: '4px 10px',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    background: selectedDate === today ? '#ecfdf5' : '#eff6ff',
-                    color: selectedDate === today ? '#166534' : '#1d4ed8',
-                    border: `1px solid ${selectedDate === today ? '#a7f3d0' : '#bfdbfe'}`,
-                  }}>
-                    {selectedDate === today ? '📍 Managing Today\'s Register' : `📅 Date: ${formatDate(selectedDate)}`}
-                  </span>
-                </div>
+                      background: '#ecfdf5',
+                      color: '#047857',
+                      border: '1px solid #a7f3d0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}>
+                      📍 Today's Marking Register: <b>{formatDate(today)}</b>
+                    </span>
+                    <span style={{ fontSize: '0.82rem', color: '#047857', background: '#f0fdf4', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bbf7d0', fontWeight: 600 }}>
+                      ✓ Marking is active for Today only. Historical and upcoming dates cannot be marked.
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#374151' }}>Filter Historical Logs by Date:</span>
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => {
+                        if (e.target.value) setSelectedDate(e.target.value);
+                      }}
+                      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #047857', fontWeight: 700, color: '#111827', fontSize: '0.9rem' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDate(today)}
+                      style={{
+                        padding: '6px 12px',
+                        background: selectedDate === today ? '#ecfdf5' : '#f3f4f6',
+                        border: `1px solid ${selectedDate === today ? '#86efac' : '#d1d5db'}`,
+                        color: selectedDate === today ? '#047857' : '#374151',
+                        borderRadius: '6px',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Reset to Today
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1875,106 +1886,6 @@ export default function EmployeeManagerDashboard() {
                     </tbody>
                   </table>
                 </div>
-
-                {/* Collapsible Manual Detailed Entry Card */}
-                <details style={{ background: '#fff', borderRadius: '12px', padding: '16px 20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                  <summary style={{ fontWeight: 700, color: '#374151', cursor: 'pointer', fontSize: '0.92rem' }}>
-                    ➕ Manual Custom Attendance Entry (Click to expand)
-                  </summary>
-                  <div style={{ marginTop: '16px' }}>
-                    <form onSubmit={submitAttendance} noValidate style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', alignItems: 'flex-end' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Employee *</label>
-                        <select
-                          value={attendanceForm.employeeId}
-                          onChange={(e) => {
-                            setAttendanceForm({ ...attendanceForm, employeeId: e.target.value });
-                            if (attFormErrors.employeeId) setAttFormErrors({ ...attFormErrors, employeeId: '' });
-                          }}
-                          required
-                          style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.employeeId ? '#ef4444' : '#d1d5db'}` }}
-                        >
-                          <option value="">-- Choose Employee --</option>
-                          {employees.map((emp) => {
-                            const isMarked = attendanceList.some((a) => a.employee?.id === emp.id);
-                            return (
-                              <option key={emp.id} value={emp.id} disabled={isMarked}>
-                                {emp.name} ({emp.employeeId || `EMP-${emp.id}`}) - {emp.role} {isMarked ? '(Marked)' : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                        {attFormErrors.employeeId && (
-                          <span style={{ color: '#ef4444', fontSize: '0.78rem', display: 'block', marginTop: '4px' }}>
-                            {attFormErrors.employeeId}
-                          </span>
-                        )}
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Status *</label>
-                        <select
-                          value={attendanceForm.status}
-                          onChange={(e) => {
-                            setAttendanceForm({ ...attendanceForm, status: e.target.value });
-                            if (attFormErrors.status) setAttFormErrors({ ...attFormErrors, status: '' });
-                          }}
-                          style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: `1px solid ${attFormErrors.status ? '#ef4444' : '#d1d5db'}` }}
-                        >
-                          {ATTENDANCE_STATUSES.map((st) => (
-                            <option key={st} value={st}>
-                              {st}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {['PRESENT', 'LATE', 'HALF_DAY'].includes(attendanceForm.status) && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Check-In Time</label>
-                          <input
-                            type="time"
-                            value={attendanceForm.checkInTime}
-                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkInTime: e.target.value })}
-                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                          />
-                        </div>
-                      )}
-
-                      {['PRESENT', 'HALF_DAY'].includes(attendanceForm.status) && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Check-Out Time</label>
-                          <input
-                            type="time"
-                            value={attendanceForm.checkOutTime}
-                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkOutTime: e.target.value })}
-                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                          />
-                        </div>
-                      )}
-
-                      <div style={{ gridColumn: 'span 2' }}>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>Remarks / Site Notes</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. Morning foundation inspection, Sick leave approved..."
-                          value={attendanceForm.remarks}
-                          onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
-                          style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                        />
-                      </div>
-
-                      <div>
-                        <button
-                          type="submit"
-                          style={{ width: '100%', padding: '10px 16px', background: '#047857', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          Record Attendance
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </details>
               </div>
             )}
 

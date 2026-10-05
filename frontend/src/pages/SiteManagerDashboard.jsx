@@ -12,6 +12,7 @@ import {
   getStockAlerts,
   updateMaterial,
   createMaterialRequest,
+  getMaterialRequests,
   getProjects,
 } from '../services/api';
 
@@ -23,6 +24,7 @@ export default function SiteManagerDashboard() {
   const [summary, setSummary] = useState({});
   const [stockAlerts, setStockAlerts] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [materialRequests, setMaterialRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -59,12 +61,13 @@ export default function SiteManagerDashboard() {
   const loadAll = async () => {
     try {
       setLoading(true);
-      const [matData, catData, sumData, alertsData, projsData] = await Promise.all([
+      const [matData, catData, sumData, alertsData, projsData, reqsData] = await Promise.all([
         getMaterials({ search, category: categoryFilter }),
         getMaterialCategories().catch(() => []),
         getInventorySummary().catch(() => ({})),
         getStockAlerts().catch(() => []),
         getProjects({ realOnly: true }).catch(() => []),
+        getMaterialRequests().catch(() => []),
       ]);
 
       setMaterials(matData || []);
@@ -72,6 +75,7 @@ export default function SiteManagerDashboard() {
       setSummary(sumData || {});
       setStockAlerts(alertsData || []);
       setProjects(projsData || []);
+      setMaterialRequests(reqsData || []);
       setError('');
     } catch (err) {
       setError(err.message || 'Error loading site manager dashboard data.');
@@ -153,24 +157,29 @@ export default function SiteManagerDashboard() {
       setError('Please fill in material and quantity.');
       return;
     }
+    if (!requestForm.projectId) {
+      setError('Please select a target construction project for the material request.');
+      return;
+    }
     setSubmittingReq(true);
     try {
       await createMaterialRequest({
         material: { id: Number(requestForm.materialId) },
-        project: requestForm.projectId ? { id: Number(requestForm.projectId) } : null,
-        quantity: Number(requestForm.quantity),
-        priority: requestForm.priority,
-        notes: requestForm.notes.trim(),
-        requestedBy: `Site Manager (${user?.displayName || user?.username})`,
+        project: { id: Number(requestForm.projectId) },
+        requestedQuantity: Number(requestForm.quantity),
+        remarks: (requestForm.notes ? requestForm.notes.trim() + ' ' : '') + (requestForm.priority ? `[Priority: ${requestForm.priority}]` : ''),
+        requestedBy: `Site Manager (${user?.displayName || user?.username || 'Site Lead'})`,
       });
       setNotice('✓ Material request submitted for Inventory Manager approval.');
       setRequestForm({
         materialId: '',
-        projectId: '',
+        projectId: projects[0]?.id ? String(projects[0].id) : '',
         quantity: '',
         priority: 'MEDIUM',
         notes: '',
       });
+      const reqsData = await getMaterialRequests().catch(() => []);
+      setMaterialRequests(reqsData || []);
       setTimeout(() => setNotice(''), 4000);
     } catch (err) {
       setError(err.message || 'Failed to submit material request.');
@@ -249,7 +258,7 @@ export default function SiteManagerDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            ⚠️ Low Stock Informer &amp; Alerts ({stockAlerts.length})
+            Low Stock Informer &amp; Alerts ({stockAlerts.length})
           </button>
           <button
             onClick={() => setTab('inventory')}
@@ -264,7 +273,7 @@ export default function SiteManagerDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            📦 Site Materials &amp; Quick Stock Update ({materials.length})
+            Site Materials &amp; Quick Stock Update ({materials.length})
           </button>
           <button
             onClick={() => setTab('requests')}
@@ -279,7 +288,7 @@ export default function SiteManagerDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            📝 Request Material Dispatch
+            Request Material Dispatch
           </button>
         </div>
 
@@ -741,7 +750,8 @@ export default function SiteManagerDashboard() {
 
         {/* TAB 3: REQUEST MATERIAL DISPATCH */}
         {tab === 'requests' && (
-          <div style={{ maxWidth: '600px', margin: '0 auto', background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ maxWidth: '600px', margin: '0 auto', background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', width: '100%' }}>
             <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.3rem' }}>
               📝 Submit Material Dispatch Request
             </h3>
@@ -847,6 +857,91 @@ export default function SiteManagerDashboard() {
                 {submittingReq ? 'Submitting Request...' : '📨 Submit Material Dispatch Request'}
               </button>
             </form>
+          </div>
+
+          {/* Request History — Inventory Manager Approval/Rejection Status */}
+          <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginTop: '20px' }}>
+            <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem' }}>
+              My Material Dispatch Requests — Inventory Manager Response
+            </h3>
+            <p style={{ margin: '0 0 16px', color: '#6b7280', fontSize: '0.85rem' }}>
+              Track the approval or rejection of each request you submitted. Refresh the page to see the latest status.
+            </p>
+
+            {materialRequests.filter(r => r.requestedBy && r.requestedBy.toLowerCase().includes('site manager')).length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
+                <p style={{ margin: 0, fontSize: '0.9rem' }}>No material dispatch requests submitted yet. Use the form above.</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                  <thead style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                    <tr>
+                      <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>REQUEST CODE &amp; DATE</th>
+                      <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>PROJECT</th>
+                      <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>MATERIAL</th>
+                      <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>QTY REQUESTED</th>
+                      <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>STATUS</th>
+                      <th style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>REMARKS / MANAGER RESPONSE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materialRequests
+                      .filter(r => !r.requestedBy || r.requestedBy.toLowerCase().includes('site manager') || r.requestedBy.toLowerCase().includes('site engineer') || r.requestedBy.toLowerCase().includes(user?.username?.toLowerCase() || ''))
+                      .sort((a, b) => new Date(b.requestDate || b.createdAt || 0) - new Date(a.requestDate || a.createdAt || 0))
+                      .map((req) => {
+                        const statusColor = req.status === 'APPROVED'
+                          ? { bg: '#dbeafe', text: '#1e40af' }
+                          : req.status === 'ISSUED'
+                          ? { bg: '#dcfce7', text: '#166534' }
+                          : req.status === 'REJECTED'
+                          ? { bg: '#fee2e2', text: '#991b1b' }
+                          : { bg: '#fef3c7', text: '#92400e' };
+                        return (
+                          <tr key={req.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 14px', color: '#374151' }}>
+                              <strong>{req.requestCode || `#REQ-${req.id}`}</strong>
+                              <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{formatDate(req.requestDate || req.createdAt)}</div>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#374151' }}>
+                              {req.project?.name || 'Project Site'}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <strong>{req.material?.name || 'Material'}</strong>
+                              <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{req.material?.materialCode}</div>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#374151' }}>
+                              <strong>{req.requestedQuantity || req.quantity}</strong> {req.material?.unit || 'units'}
+                              {req.issuedQuantity > 0 && (
+                                <div style={{ fontSize: '0.75rem', color: '#059669' }}>Issued: {req.issuedQuantity}</div>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{
+                                padding: '3px 10px',
+                                borderRadius: '12px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                background: statusColor.bg,
+                                color: statusColor.text,
+                              }}>
+                                {req.status === 'PENDING' ? 'Awaiting Review' : req.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#4b5563' }}>
+                              {req.remarks || (req.status === 'PENDING' ? 'Pending review by Inventory Manager…' : '—')}
+                              {req.approvedBy && (
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Reviewed by: {req.approvedBy}</div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
           </div>
         )}
       </main>

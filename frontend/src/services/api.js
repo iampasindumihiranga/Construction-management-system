@@ -150,12 +150,29 @@ export const addMilestone = (projectId, milestone) => request(`/api/projects/${p
 export const updateMilestone = (projectId, milestoneId, milestone) => request(`/api/projects/${projectId}/milestones/${milestoneId}`, { method: 'PUT', body: milestone });
 export const deleteMilestone = (projectId, milestoneId) => request(`/api/projects/${projectId}/milestones/${milestoneId}`, { method: 'DELETE' });
 
+// Client-Visible Designs (dedicated `designs` table)
+export const getDesigns = (params = {}) => {
+  const query = new URLSearchParams();
+  if (params.category) query.set('category', params.category);
+  const qs = query.toString();
+  return request(`/api/designs${qs ? `?${qs}` : ''}`);
+};
+export const getDesignById = (id) => request(`/api/designs/${id}`);
+export const createDesign = (design) => request('/api/designs', { method: 'POST', body: design });
+export const updateDesign = (id, design) => request(`/api/designs/${id}`, { method: 'PUT', body: design });
+export const deleteDesign = (id) => request(`/api/designs/${id}`, { method: 'DELETE' });
+
 // Inquiries & Communication History (US-CM-14, 15, 16)
 export const getInquiries = (clientId) => request(`/api/inquiries${clientId ? `?clientId=${clientId}` : ''}`);
 export const createInquiry = (inquiry) => request('/api/inquiries', { method: 'POST', body: inquiry });
 export const respondToInquiry = (id, response, respondedBy = 'Client Manager') => request(`/api/inquiries/${id}/respond`, {
   method: 'PUT',
   body: { response, respondedBy },
+});
+// Threaded conversation: senderRole is 'CLIENT' or 'CLIENT_MANAGER'
+export const sendInquiryMessage = (id, { senderRole, senderName, message }) => request(`/api/inquiries/${id}/messages`, {
+  method: 'POST',
+  body: { senderRole, senderName, message },
 });
 export const deleteInquiry = (id) => request(`/api/inquiries/${id}`, { method: 'DELETE' });
 
@@ -383,4 +400,19 @@ export const getPaymentSummary = (clientId, projectId) => {
 // Bank Details (editable by Client Manager, read by Client)
 export const getBankDetails = () => request('/api/bank-details');
 export const updateBankDetails = (details) => request('/api/bank-details', { method: 'PUT', body: details });
+
+// Supplier Management (Inventory)
+export const getSuppliers = (params = {}) => {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.category) query.set('category', params.category);
+  if (params.status) query.set('status', params.status);
+  const qs = query.toString();
+  return request(`/api/inventory/suppliers${qs ? `?${qs}` : ''}`);
+};
+export const getNextSupplierCode = () => request('/api/inventory/suppliers/next-code');
+export const getSupplierById = (id) => request(`/api/inventory/suppliers/${id}`);
+export const createSupplier = (supplier) => request('/api/inventory/suppliers', { method: 'POST', body: supplier });
+export const updateSupplier = (id, supplier) => request(`/api/inventory/suppliers/${id}`, { method: 'PUT', body: supplier });
+export const deleteSupplier = (id) => request(`/api/inventory/suppliers/${id}`, { method: 'DELETE' });
 

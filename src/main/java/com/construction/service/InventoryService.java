@@ -15,7 +15,9 @@ import com.construction.repository.MaterialTransactionRepository;
 import com.construction.repository.ProjectRepository;
 import com.construction.repository.PurchaseOrderRepository;
 import com.construction.model.StockAlert;
+import com.construction.model.Supplier;
 import com.construction.repository.StockAlertRepository;
+import com.construction.repository.SupplierRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +41,7 @@ public class InventoryService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final ProjectRepository projectRepository;
     private final StockAlertRepository stockAlertRepository;
+    private final SupplierRepository supplierRepository;
     private final MaterialSchemaMigration materialSchemaMigration;
 
     public InventoryService(
@@ -48,6 +51,7 @@ public class InventoryService {
             PurchaseOrderRepository purchaseOrderRepository,
             ProjectRepository projectRepository,
             StockAlertRepository stockAlertRepository,
+            SupplierRepository supplierRepository,
             MaterialSchemaMigration materialSchemaMigration
     ) {
         this.materialRepository = materialRepository;
@@ -56,6 +60,7 @@ public class InventoryService {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.projectRepository = projectRepository;
         this.stockAlertRepository = stockAlertRepository;
+        this.supplierRepository = supplierRepository;
         this.materialSchemaMigration = materialSchemaMigration;
     }
 
@@ -103,6 +108,19 @@ public class InventoryService {
             // Requests, issues, and purchase orders are created from the dashboard.
             // Keeping demo data to the material catalog avoids coupling startup to
             // legacy request-table columns from earlier database versions.
+        }
+
+        if (supplierRepository.count() == 0) {
+            Supplier tokyo = new Supplier("SUP001", "Tokyo Cement Lanka", "Kamal Perera", "+94 11 258 9631", "sales@tokyocement.lk", "Negombo Road, Peliyagoda", "Building Materials", "Portland General Cement, Blended Hydraulic Cement, Ready-mix Mortar", "Net 30 Days");
+            Supplier kelaniBricks = new Supplier("SUP002", "Kelani Brick Works", "Sunil Silva", "+94 11 291 4455", "info@kelanibricks.lk", "Biyagama Road, Kelaniya", "Building Materials", "Wire-Cut Red Bricks, Clay Engineering Bricks, Solid Blocks", "Cash on Delivery");
+            Supplier mahaweliSand = new Supplier("SUP003", "Mahaweli Sand Suppliers", "Anura Bandara", "+94 81 223 8899", "orders@mahawelisand.lk", "Katugastota, Kandy", "Building Materials", "Fine River Sand, Plastering Sand, Concrete Aggregate Sand", "Net 15 Days");
+            Supplier lanwaSteel = new Supplier("SUP004", "Lanwa Sanstha Steel", "Nimal Fernando", "+94 11 245 7788", "contracts@lanwasteel.com", "Ceylon Steel Complex, Oruwala, Athurugiriya", "Structural Steel", "12mm Deformed High-Yield Rebars, 16mm Tor Steel, BRC Wire Mesh", "Net 30 Days");
+            Supplier kelaniCables = new Supplier("SUP005", "Kelani Cables PLC", "Ravi Jayawardena", "+94 11 252 5701", "marketing@kelanicables.com", "P.O. Box 14, Wewelduwa, Kelaniya", "Electrical Materials", "2.5mm Twin & Earth Copper Cable, 4mm Armoured Cable, Conduit Pipes", "Credit 30 Days");
+            Supplier orangeElectric = new Supplier("SUP006", "Orange Electric", "Dhammika Weerasinghe", "+94 11 452 0300", "support@orange.lk", "Meegoda, Homagama", "Electrical Materials", "13A Modular Wall Socket & Switch, MCB Distribution Boxes, LED Floodlights", "Net 30 Days");
+            Supplier duluxPaints = new Supplier("SUP007", "Dulux Paints (AkzoNobel)", "Chathura Dias", "+94 11 476 1111", "dulux.orders@akzonobel.com", "Welisara, Ragama", "Finishing & Paint", "Weather-Shield Exterior Acrylic Paint, Interior Emulsion, Wall Putty, Primer", "Net 30 Days");
+            Supplier rocellCeramics = new Supplier("SUP008", "Rocell Ceramics PLC", "Pradeep Senaratne", "+94 11 479 9400", "commercial@rocell.com", "Rocell Floor, Nawala Road, Rajagiriya", "Finishing & Paint", "Porcelain Glazed Floor Tiles (60x60cm), Ceramic Wall Tiles, Grout & Tile Adhesive", "50% Advance");
+
+            supplierRepository.saveAll(List.of(tokyo, kelaniBricks, mahaweliSand, lanwaSteel, kelaniCables, orangeElectric, duluxPaints, rocellCeramics));
         }
     }
 
@@ -194,6 +212,72 @@ public class InventoryService {
     }
 
     // Material Request & Approval Operations (Steps 5 & 6)
+    public MaterialRequest createRequest(Map<String, Object> payload) {
+        Long projectId = null;
+        if (payload.get("projectId") != null && !payload.get("projectId").toString().isBlank()) {
+            projectId = Long.valueOf(payload.get("projectId").toString());
+        } else if (payload.get("project") instanceof Map<?, ?> pMap && pMap.get("id") != null) {
+            projectId = Long.valueOf(pMap.get("id").toString());
+        }
+
+        Long materialId = null;
+        if (payload.get("materialId") != null && !payload.get("materialId").toString().isBlank()) {
+            materialId = Long.valueOf(payload.get("materialId").toString());
+        } else if (payload.get("material") instanceof Map<?, ?> mMap && mMap.get("id") != null) {
+            materialId = Long.valueOf(mMap.get("id").toString());
+        }
+
+        Double quantity = null;
+        if (payload.get("requestedQuantity") != null && !payload.get("requestedQuantity").toString().isBlank()) {
+            quantity = Double.valueOf(payload.get("requestedQuantity").toString());
+        } else if (payload.get("quantity") != null && !payload.get("quantity").toString().isBlank()) {
+            quantity = Double.valueOf(payload.get("quantity").toString());
+        }
+
+        if (projectId == null) {
+            throw new BadRequestException("Project is required for requesting materials");
+        }
+        if (materialId == null) {
+            throw new BadRequestException("Material is required for request");
+        }
+        if (quantity == null || quantity <= 0) {
+            throw new BadRequestException("Requested quantity must be greater than zero");
+        }
+
+        final Long finalProjectId = projectId;
+        final Long finalMaterialId = materialId;
+
+        Project project = projectRepository.findById(finalProjectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found with id " + finalProjectId));
+        Material material = getMaterialById(finalMaterialId);
+
+        MaterialRequest entity = new MaterialRequest();
+        entity.setProject(project);
+        entity.setMaterial(material);
+        entity.setRequestedQuantity(quantity);
+
+        if (payload.get("requestedBy") != null) {
+            entity.setRequestedBy(payload.get("requestedBy").toString());
+        }
+        if (payload.get("remarks") != null) {
+            entity.setRemarks(payload.get("remarks").toString());
+        } else if (payload.get("notes") != null) {
+            entity.setRemarks(payload.get("notes").toString());
+        }
+        if (payload.get("requiredDate") != null && !payload.get("requiredDate").toString().isBlank()) {
+            try {
+                entity.setRequiredDate(LocalDate.parse(payload.get("requiredDate").toString()));
+            } catch (Exception ignored) {}
+        }
+
+        entity.setRequestCode(generateRequestCode());
+        entity.setStatus("PENDING");
+        entity.setRequestDate(LocalDate.now());
+        entity.setIssuedQuantity(0.0);
+
+        return requestRepository.save(entity);
+    }
+
     public MaterialRequest createRequest(MaterialRequest request) {
         if (request.getProject() == null || request.getProject().getId() == null) {
             throw new BadRequestException("Project is required for requesting materials");
@@ -201,20 +285,27 @@ public class InventoryService {
         if (request.getMaterial() == null || request.getMaterial().getId() == null) {
             throw new BadRequestException("Material is required for request");
         }
+        if (request.getRequestedQuantity() == null || request.getRequestedQuantity() <= 0) {
+            throw new BadRequestException("Requested quantity must be greater than zero");
+        }
 
         Project project = projectRepository.findById(request.getProject().getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found with id " + request.getProject().getId()));
         Material material = getMaterialById(request.getMaterial().getId());
 
-        request.setProject(project);
-        request.setMaterial(material);
-        if (request.getRequestCode() == null || request.getRequestCode().isBlank()) {
-            request.setRequestCode(generateRequestCode());
-        }
-        request.setStatus("PENDING");
-        request.setRequestDate(LocalDate.now());
+        MaterialRequest entity = new MaterialRequest();
+        entity.setProject(project);
+        entity.setMaterial(material);
+        entity.setRequestedQuantity(request.getRequestedQuantity());
+        entity.setRequestedBy(request.getRequestedBy());
+        entity.setRequiredDate(request.getRequiredDate());
+        entity.setRemarks(request.getRemarks());
+        entity.setRequestCode(request.getRequestCode() != null && !request.getRequestCode().isBlank() ? request.getRequestCode() : generateRequestCode());
+        entity.setStatus("PENDING");
+        entity.setRequestDate(request.getRequestDate() != null ? request.getRequestDate() : LocalDate.now());
+        entity.setIssuedQuantity(0.0);
 
-        return requestRepository.save(request);
+        return requestRepository.save(entity);
     }
 
     public MaterialRequest approveRequest(Long id, String approvedBy, String remarks) {
@@ -457,7 +548,72 @@ public class InventoryService {
         summary.put("pendingStockAlertsCount", pendingStockAlerts);
         summary.put("categoryCounts", categoryCounts);
 
+        long totalSuppliers = supplierRepository.count();
+        long activeSuppliers = supplierRepository.findByStatusOrderByCreatedAtDesc("ACTIVE").size();
+        summary.put("totalSuppliersCount", totalSuppliers);
+        summary.put("activeSuppliersCount", activeSuppliers);
+
         return summary;
+    }
+
+    // Supplier Management & Procurement Operations
+    public synchronized String generateSupplierCode() {
+        long count = supplierRepository.count() + 1;
+        String code;
+        do {
+            code = String.format("SUP%03d", count++);
+        } while (supplierRepository.existsBySupplierCodeIgnoreCase(code));
+        return code;
+    }
+
+    public String previewNextSupplierCode() {
+        return generateSupplierCode();
+    }
+
+    public Supplier createSupplier(Supplier supplier) {
+        if (supplier.getSupplierCode() == null || supplier.getSupplierCode().isBlank()) {
+            supplier.setSupplierCode(generateSupplierCode());
+        } else if (supplierRepository.existsBySupplierCodeIgnoreCase(supplier.getSupplierCode())) {
+            throw new ConflictException("Supplier code '" + supplier.getSupplierCode() + "' already exists");
+        }
+        if (supplier.getStatus() == null || supplier.getStatus().isBlank()) {
+            supplier.setStatus("ACTIVE");
+        }
+        if (supplier.getCreatedAt() == null) {
+            supplier.setCreatedAt(LocalDateTime.now());
+        }
+        return supplierRepository.save(supplier);
+    }
+
+    public List<Supplier> getAllSuppliers(String search, String category, String status) {
+        return supplierRepository.searchSuppliers(search, category, status);
+    }
+
+    public Supplier getSupplierById(Long id) {
+        return supplierRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Supplier not found with id " + id));
+    }
+
+    public Supplier updateSupplier(Long id, Supplier update) {
+        Supplier existing = getSupplierById(id);
+        existing.setName(update.getName());
+        existing.setContactPerson(update.getContactPerson());
+        existing.setPhone(update.getPhone());
+        existing.setEmail(update.getEmail());
+        existing.setAddress(update.getAddress());
+        existing.setCategory(update.getCategory());
+        existing.setSuppliedItems(update.getSuppliedItems());
+        existing.setPaymentTerms(update.getPaymentTerms());
+        if (update.getStatus() != null && !update.getStatus().isBlank()) {
+            existing.setStatus(update.getStatus());
+        }
+        existing.setNotes(update.getNotes());
+        return supplierRepository.save(existing);
+    }
+
+    public void deleteSupplier(Long id) {
+        Supplier existing = getSupplierById(id);
+        supplierRepository.delete(existing);
     }
 
     // Site Manager: Create Stock Alert / Low Stock Report
@@ -491,10 +647,20 @@ public class InventoryService {
     }
 
     private String generateRequestCode() {
-        long count = requestRepository.count() + 1;
+        long next = 1;
+        for (MaterialRequest r : requestRepository.findAll()) {
+            String current = r.getRequestCode();
+            if (current == null) continue;
+            String num = current.replaceAll("\\D", "");
+            if (!num.isBlank()) {
+                try {
+                    next = Math.max(next, Long.parseLong(num) + 1);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
         String code;
         do {
-            code = String.format("REQ%03d", count++);
+            code = String.format("REQ%03d", next++);
         } while (requestRepository.existsByRequestCodeIgnoreCase(code));
         return code;
     }

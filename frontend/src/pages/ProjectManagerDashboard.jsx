@@ -582,9 +582,6 @@ export default function ProjectManagerDashboard() {
           <button onClick={startProject} className={tab === 'projects' ? 'active' : ''}>
             Projects
           </button>
-          <button onClick={() => setTab('clients')} className={tab === 'clients' ? 'active' : ''}>
-            Assign Clients
-          </button>
           <button onClick={() => setTab('assignments')} className={tab === 'assignments' ? 'active' : ''}>
             Assign Employees
           </button>

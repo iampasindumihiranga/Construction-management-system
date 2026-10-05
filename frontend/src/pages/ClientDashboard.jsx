@@ -4,12 +4,15 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PropertyExplorer from '../components/PropertyExplorer';
 import SwipeableDesignGallery from '../components/SwipeableDesignGallery';
+import InquiryThread from '../components/InquiryThread';
 import { useAuth } from '../context/AuthContext';
 import {
   getClients,
   getProjects,
+  getDesigns,
   getInquiries,
   createInquiry,
+  sendInquiryMessage,
   getProjectRequests,
   createProjectRequest,
   getDocuments,
@@ -226,7 +229,7 @@ export default function ClientDashboard() {
     try {
       const [allClients, showcaseProjects, bankDet] = await Promise.all([
         getClients(),
-        getProjects({ marketingOnly: true }),
+        getDesigns().catch(() => []),
         getBankDetails().catch(() => null),
       ]);
       if (bankDet && (bankDet.bankName || bankDet.accountNumber || bankDet.id)) {
@@ -440,6 +443,11 @@ export default function ClientDashboard() {
     }
     setError('');
     setCardErrors({ cardNumber: '', cardHolder: '', expiry: '', cvv: '' });
+    setPayForm(prev => ({
+      ...prev,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      paymentMethod: 'Credit / Debit Card',
+    }));
     setActiveTab('card-checkout');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -568,6 +576,10 @@ export default function ClientDashboard() {
     }
   };
 
+  const [clientReplyingId, setClientReplyingId] = useState(null);
+  const [clientReplyText, setClientReplyText] = useState('');
+  const [sendingClientReply, setSendingClientReply] = useState(false);
+
   const handleOpenDesignInquiry = (design) => {
     setDesignInquiryTarget(design);
     setDesignInquiryMessage(`I would like to receive official details and consultation regarding ${design.name} (${design.category}). Please provide the complete architectural plan, pricing, and next steps.`);
@@ -582,9 +594,10 @@ export default function ClientDashboard() {
     try {
       await createInquiry({
         client: { id: clientProfile.id },
-        project: { id: designInquiryTarget.id },
+        design: { id: designInquiryTarget.id },
         subject: `Company Design Inquiry: ${designInquiryTarget.name}`,
         message: designInquiryMessage.trim(),
+        initiatedBy: 'CLIENT',
       });
       setSuccessMsg(`Your inquiry for "${designInquiryTarget.name}" has been sent directly to the Client Manager!`);
       setDesignInquiryModalOpen(false);
@@ -597,6 +610,30 @@ export default function ClientDashboard() {
       setError(err.message || 'Failed to submit inquiry to Client Manager');
     } finally {
       setSendingDesignInquiry(false);
+    }
+  };
+
+  const handleClientReply = async (e, inquiryId) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!inquiryId || !clientReplyText.trim()) return;
+    setSendingClientReply(true);
+    setError('');
+    try {
+      await sendInquiryMessage(inquiryId, {
+        senderRole: 'CLIENT',
+        senderName: clientProfile?.name || 'Client',
+        message: clientReplyText.trim(),
+      });
+      setSuccessMsg('Your reply has been sent to the Client Manager!');
+      setClientReplyingId(null);
+      setClientReplyText('');
+      const inqData = await getInquiries(clientProfile.id);
+      setInquiries(inqData);
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err) {
+      setError(err.message || 'Failed to send reply to Client Manager');
+    } finally {
+      setSendingClientReply(false);
     }
   };
 
@@ -852,12 +889,13 @@ export default function ClientDashboard() {
 
       const chosenProj = projects.find(p => p.id === Number(payForm.projectId));
       const txnRef = `ODL-CC-${Date.now().toString().slice(-8)}`;
+      const todayDate = new Date().toISOString().slice(0, 10);
 
       await createDownPayment({
         client: { id: clientProfile.id },
         project: payForm.projectId ? { id: Number(payForm.projectId) } : null,
         amount: Number(payForm.amount),
-        paymentDate: payForm.paymentDate || new Date().toISOString().slice(0, 10),
+        paymentDate: todayDate,
         paymentMethod: 'Credit / Debit Card',
         status: 'Valid',
         referenceNumber: txnRef,
@@ -889,7 +927,7 @@ export default function ClientDashboard() {
         txnRef,
         amount: Number(payForm.amount),
         projectName: chosenProj?.name || 'General Project Down Payment',
-        date: payForm.paymentDate || new Date().toISOString().slice(0, 10),
+        date: todayDate,
         paymentMethod: `Credit / Debit Card (${getCardBrand(cardForm.cardNumber)} •••• ${cleanNum.slice(-4)})`,
         message: 'Your card payment has been authorized and completed successfully! An official confirmation message has been delivered to your in-app notifications.'
       });
@@ -1920,73 +1958,117 @@ export default function ClientDashboard() {
 
               {inquiries.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  {inquiries.map((inq) => (
+                  {inquiries.map((inq) => {
+                    const isReplying = clientReplyingId === inq.id;
+                    const isManagerInitiated = inq.initiatedBy === 'CLIENT_MANAGER';
+                    return (
                     <div
                       key={inq.id}
                       style={{
-                        background: '#f8fafc',
-                        border: '1px solid var(--border-color)',
+                        background: '#ffffff',
+                        border: inq.status === 'ANSWERED' ? '1.5px solid #16a34a' : '1px solid var(--border-color)',
                         borderRadius: 'var(--radius-md)',
                         padding: '1.5rem',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                        <strong style={{ fontSize: '1.1rem', color: '#0f172a' }}>{inq.subject}</strong>
-                        <span className={`pill-badge ${inq.status?.toLowerCase()}`}>
-                          {inq.status === 'ANSWERED' ? 'Answered' : 'Pending'}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <strong style={{ fontSize: '1.1rem', color: '#0f172a' }}>{inq.subject}</strong>
+                          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                            <small style={{ color: 'var(--text-muted)' }}>
+                              Started {formatDate(inq.createdAt)} {isManagerInitiated ? 'by Client Manager' : 'by You'}
+                            </small>
+                            {(inq.design || inq.project) && (
+                              <small style={{ color: '#0369a1', fontWeight: 600 }}>
+                                🏠 {inq.design ? 'Design' : 'Project'}: {(inq.design || inq.project).name}
+                              </small>
+                            )}
+                          </div>
+                        </div>
+                        <span className={`pill-badge ${inq.status?.toLowerCase()}`} style={{
+                          background: inq.status === 'ANSWERED' ? '#dcfce7' : '#fef3c7',
+                          color: inq.status === 'ANSWERED' ? '#15803d' : '#b45309',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          border: `1px solid ${inq.status === 'ANSWERED' ? '#bbf7d0' : '#fde68a'}`,
+                          padding: '0.25rem 0.65rem',
+                        }}>
+                          {inq.status === 'ANSWERED' ? '✓ New Reply from Manager' : '⏳ Awaiting Manager'}
                         </span>
                       </div>
-                      <p style={{ color: '#334155', fontSize: '0.95rem', margin: '0.75rem 0' }}>{inq.message}</p>
-                      {inq.attachmentData && (
-                        <a href={inq.attachmentData} download={inq.attachmentName || 'inquiry-attachment'} className="btn-outline-green" style={{ display: 'inline-flex', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
-                          View attached design: {inq.attachmentName || 'attachment'}
-                        </a>
-                      )}
-                      <small style={{ color: 'var(--text-muted)' }}>
-                        Sent on {formatDate(inq.createdAt)} {inq.project ? `| ${inq.project.marketingDesign ? 'Company Design' : 'Project'}: ${inq.project.name}` : ''}
-                      </small>
 
-                      {inq.response ? (
-                        <div style={{
-                          marginTop: '1rem',
-                          padding: '1.15rem 1.35rem',
-                          background: '#f0fdf4',
-                          border: '1px solid #bbf7d0',
-                          borderLeft: '5px solid #16a34a',
-                          borderRadius: '0 8px 8px 0',
-                          boxShadow: '0 1px 3px rgba(22, 163, 74, 0.05)'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            <strong style={{ color: '#15803d', fontSize: '0.92rem' }}>
-                              ✓ Official Response from {inq.respondedBy || 'Client Manager'}:
-                            </strong>
-                            <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>
-                              {inq.respondedAt ? formatDate(inq.respondedAt) : 'Recently'}
-                            </span>
-                          </div>
-                          <p style={{ color: '#0f172a', fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.55 }}>
-                            {inq.response}
-                          </p>
+                      {/* Threaded Conversation History */}
+                      <InquiryThread inquiry={inq} viewerRole="CLIENT" />
+
+                      {inq.attachmentData && (
+                        <div style={{ margin: '0.5rem 0' }}>
+                          <a href={inq.attachmentData} download={inq.attachmentName || 'inquiry-attachment'} className="btn-outline-green" style={{ display: 'inline-flex', fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}>
+                            📎 View attachment: {inq.attachmentName || 'attachment'}
+                          </a>
                         </div>
-                      ) : (
+                      )}
+
+                      {/* Client Reply Composer */}
+                      {isReplying ? (
                         <div style={{
                           marginTop: '0.85rem',
-                          padding: '0.75rem 1rem',
-                          background: '#fffbeb',
-                          border: '1px solid #fef3c7',
-                          borderLeft: '4px solid #f59e0b',
-                          borderRadius: '0 6px 6px 0',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.5rem'
+                          padding: '0.85rem',
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: 8,
                         }}>
-                          <span style={{ color: '#b45309', fontSize: '0.88rem', fontWeight: 600 }}>
-                            ⏳ Inquiry Received — Awaiting Client Manager Review. You will receive a direct notification once answered.
-                          </span>
+                          <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.35rem' }}>
+                            Your Reply to Client Manager:
+                          </label>
+                          <textarea
+                            rows={3}
+                            placeholder="Type your reply or question here..."
+                            value={clientReplyText}
+                            onChange={(e) => setClientReplyText(e.target.value)}
+                            style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.9rem', boxSizing: 'border-box' }}
+                          />
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                            <button
+                              type="button"
+                              className="btn-outline-green"
+                              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
+                              onClick={() => {
+                                setClientReplyingId(null);
+                                setClientReplyText('');
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-solid-green"
+                              style={{ padding: '0.3rem 1rem', fontSize: '0.8rem' }}
+                              disabled={sendingClientReply || !clientReplyText.trim()}
+                              onClick={(e) => handleClientReply(e, inq.id)}
+                            >
+                              {sendingClientReply ? 'Sending...' : 'Send Reply →'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: '0.65rem' }}>
+                          <button
+                            type="button"
+                            className="btn-solid-green"
+                            style={{ padding: '0.35rem 0.9rem', fontSize: '0.82rem' }}
+                            onClick={() => {
+                              setClientReplyingId(inq.id);
+                              setClientReplyText('');
+                            }}
+                          >
+                            💬 Reply to Message
+                          </button>
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-muted">No inquiries submitted yet.</p>
@@ -2578,10 +2660,19 @@ export default function ClientDashboard() {
                     <label>Payment Date</label>
                     <input
                       type="date"
-                      value={payForm.paymentDate}
-                      onChange={(e) => setPayForm({ ...payForm, paymentDate: e.target.value })}
-                      required
+                      value={new Date().toISOString().slice(0, 10)}
+                      readOnly
+                      disabled
+                      style={{
+                        backgroundColor: '#f1f5f9',
+                        color: '#475569',
+                        cursor: 'not-allowed',
+                        fontWeight: 600,
+                      }}
                     />
+                    <small style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.25rem', display: 'block' }}>
+                      Today's date is automatically applied for instant card transactions.
+                    </small>
                   </div>
 
                   {/* Notes */}
@@ -2931,7 +3022,9 @@ export default function ClientDashboard() {
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#475569' }}>
                       <span>Payment Date:</span>
-                      <span style={{ color: '#0f172a', fontWeight: 600 }}>{payForm.paymentDate}</span>
+                      <span style={{ color: '#0f172a', fontWeight: 600 }}>
+                        {formatDate(payForm.paymentDate || new Date().toISOString().slice(0, 10))} (Today)
+                      </span>
                     </div>
                     {payForm.notes && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#475569' }}>

@@ -41,9 +41,8 @@ public class ProjectRequest {
     private Client client;
 
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "selected_design_id")
-    @JsonIgnoreProperties({"client", "milestones"})
-    private Project selectedDesign; // Optional reference if based on existing company design
+    @JoinColumn(name = "design_id")
+    private Design selectedDesign; // Optional reference if based on existing company design
 
     @NotBlank(message = "Project title is required")
     @Column(nullable = false)
@@ -142,11 +141,11 @@ public class ProjectRequest {
         this.client = client;
     }
 
-    public Project getSelectedDesign() {
+    public Design getSelectedDesign() {
         return selectedDesign;
     }
 
-    public void setSelectedDesign(Project selectedDesign) {
+    public void setSelectedDesign(Design selectedDesign) {
         this.selectedDesign = selectedDesign;
     }
 

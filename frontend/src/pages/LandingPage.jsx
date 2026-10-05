@@ -4,7 +4,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import PropertyExplorer from '../components/PropertyExplorer';
 import SwipeableDesignGallery from '../components/SwipeableDesignGallery';
-import { getProjects, formatMoney, createInquiry } from '../services/api';
+import { getProjects, getDesigns, formatMoney, createInquiry } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 export default function LandingPage() {
@@ -56,9 +56,10 @@ export default function LandingPage() {
         client: user?.role === 'CLIENT'
           ? { id: user.clientId || user.id, name: inquiryForm.name.trim(), email: inquiryForm.email.trim(), phone: inquiryForm.phone.trim() }
           : { name: inquiryForm.name.trim(), email: inquiryForm.email.trim(), phone: inquiryForm.phone.trim() },
-        project: { id: inquiryTargetProject.id },
+        design: { id: inquiryTargetProject.id },
         subject: inquiryForm.subject.trim() || `Official Inquiry: ${inquiryTargetProject.name}`,
         message: inquiryForm.message.trim(),
+        initiatedBy: 'CLIENT',
       };
       await createInquiry(payload);
       setInquirySuccessMsg('Your official inquiry has been sent successfully to the Client Manager!');
@@ -89,12 +90,10 @@ export default function LandingPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    // Only designs created by Client Manager are visible on the public home page
-    getProjects({ marketingOnly: true })
+    // Load designs from dedicated designs table
+    getDesigns()
       .then((data) => {
-        const clientManagerDesigns = (data || []).filter(
-          (p) => p.addedBy === 'CLIENT_MANAGER' || (p.marketingDesign && p.addedBy !== 'PROJECT_MANAGER')
-        );
+        const clientManagerDesigns = (data || []);
         setProjects(clientManagerDesigns);
 
         // Check if a specific design is requested in URL
@@ -104,7 +103,11 @@ export default function LandingPage() {
           if (matched) setSelectedProject(matched);
         }
       })
-      .catch((err) => console.error('Failed to load public designs', err));
+      .catch(() => {
+        getProjects({ marketingOnly: true })
+          .then((data) => setProjects(data || []))
+          .catch((err) => console.error('Failed to load public designs', err));
+      });
   }, [searchParams]);
 
   return (

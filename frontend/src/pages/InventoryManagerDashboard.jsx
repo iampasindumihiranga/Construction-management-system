@@ -24,6 +24,11 @@ import {
   updateMaterial,
   getStockAlerts,
   updateStockAlertStatus,
+  getSuppliers,
+  getNextSupplierCode,
+  createSupplier,
+  updateSupplier,
+  deleteSupplier,
 } from '../services/api';
 
 const DEFAULT_CATEGORIES = [
@@ -38,6 +43,16 @@ const DEFAULT_CATEGORIES = [
 
 const COMMON_UNITS = ['bags', 'kg', 'tons', 'meters', 'liters', 'units', 'sq.ft', 'cubes', 'rolls', 'boxes'];
 
+const PAYMENT_TERMS_OPTIONS = [
+  'Net 30 Days',
+  'Net 15 Days',
+  'Net 60 Days',
+  'Cash on Delivery (COD)',
+  '50% Advance, 50% on Delivery',
+  'Credit 30 Days',
+  'Immediate / Advance Payment',
+];
+
 const emptyMaterial = {
   materialCode: '',
   name: '',
@@ -51,6 +66,20 @@ const emptyMaterial = {
   description: '',
 };
 
+const emptySupplier = {
+  supplierCode: '',
+  name: '',
+  contactPerson: '',
+  email: '',
+  phone: '',
+  address: '',
+  category: 'Building Materials',
+  suppliedItems: '',
+  paymentTerms: 'Net 30 Days',
+  status: 'ACTIVE',
+  notes: '',
+};
+
 export default function InventoryManagerDashboard() {
   const [tab, setTab] = useState('overview');
   const [summary, setSummary] = useState({});
@@ -61,11 +90,20 @@ export default function InventoryManagerDashboard() {
   const [transactions, setTransactions] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [stockAlerts, setStockAlerts] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   // Search & Filter state
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+
+  // Supplier filter & modal state
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierCategoryFilter, setSupplierCategoryFilter] = useState('ALL');
+  const [supplierStatusFilter, setSupplierStatusFilter] = useState('ALL');
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState(null);
+  const [supplierForm, setSupplierForm] = useState(emptySupplier);
 
   // Form states
   const [materialForm, setMaterialForm] = useState(emptyMaterial);
@@ -100,13 +138,20 @@ export default function InventoryManagerDashboard() {
   });
 
   const [notice, setNotice] = useState('');
+
+  // Reports State
+  const [reportType, setReportType] = useState('inventory_stock'); // inventory_stock, consumption, requests, purchase_orders, site_alerts
+  const [reportCategory, setReportCategory] = useState('ALL');
+  const [reportProject, setReportProject] = useState('ALL');
+  const [reportStatus, setReportStatus] = useState('ALL');
+  const [reportSearch, setReportSearch] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const refreshData = async () => {
     try {
       setLoading(true);
-      const [sum, mats, cats, projs, reqs, txns, pos, alerts] = await Promise.all([
+      const [sum, mats, cats, projs, reqs, txns, pos, alerts, sups] = await Promise.all([
         getInventorySummary().catch(() => ({})),
         getMaterials({ search, category: selectedCategory, status: selectedStatus }).catch(() => []),
         getMaterialCategories().catch(() => DEFAULT_CATEGORIES),
@@ -115,6 +160,7 @@ export default function InventoryManagerDashboard() {
         getMaterialTransactions().catch(() => []),
         getPurchaseOrders().catch(() => []),
         getStockAlerts().catch(() => []),
+        getSuppliers().catch(() => []),
       ]);
 
       setSummary(sum || {});
@@ -128,6 +174,7 @@ export default function InventoryManagerDashboard() {
       setTransactions(txns || []);
       setPurchaseOrders(pos || []);
       setStockAlerts(alerts || []);
+      setSuppliers(sups || []);
 
       if (consumptionProjectId) {
         const cons = await getProjectMaterialConsumption(consumptionProjectId).catch(() => null);
@@ -251,18 +298,24 @@ export default function InventoryManagerDashboard() {
 
   const submitRequest = async (e) => {
     e.preventDefault();
+    if (!requestForm.projectId || !requestForm.materialId || !requestForm.requestedQuantity) {
+      fail(new Error('Please select project, material, and specify quantity.'));
+      return;
+    }
     try {
       await createMaterialRequest({
+        projectId: Number(requestForm.projectId),
+        materialId: Number(requestForm.materialId),
         project: { id: Number(requestForm.projectId) },
         material: { id: Number(requestForm.materialId) },
         requestedQuantity: Number(requestForm.requestedQuantity),
-        requestedBy: requestForm.requestedBy,
-        remarks: requestForm.remarks,
+        requestedBy: requestForm.requestedBy || 'Site Engineer',
+        remarks: requestForm.remarks || '',
       });
       report('Material request submitted for approval.');
       setRequestForm({
-        projectId: projects[0]?.id || '',
-        materialId: materials[0]?.id || '',
+        projectId: projects[0]?.id ? String(projects[0].id) : '',
+        materialId: materials[0]?.id ? String(materials[0].id) : '',
         requestedQuantity: '',
         requestedBy: 'Site Engineer',
         remarks: '',
@@ -372,6 +425,202 @@ export default function InventoryManagerDashboard() {
     return materials.filter((m) => m.quantity <= m.minStockLevel);
   }, [materials]);
 
+  const filteredSuppliers = useMemo(() => {
+    return suppliers.filter((s) => {
+      const q = supplierSearch.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        (s.name && s.name.toLowerCase().includes(q)) ||
+        (s.supplierCode && s.supplierCode.toLowerCase().includes(q)) ||
+        (s.contactPerson && s.contactPerson.toLowerCase().includes(q)) ||
+        (s.phone && s.phone.toLowerCase().includes(q)) ||
+        (s.email && s.email.toLowerCase().includes(q)) ||
+        (s.suppliedItems && s.suppliedItems.toLowerCase().includes(q)) ||
+        (s.address && s.address.toLowerCase().includes(q));
+
+      const matchCat = supplierCategoryFilter === 'ALL' || s.category === supplierCategoryFilter;
+      const matchStatus = supplierStatusFilter === 'ALL' || s.status === supplierStatusFilter;
+      return matchSearch && matchCat && matchStatus;
+    });
+  }, [suppliers, supplierSearch, supplierCategoryFilter, supplierStatusFilter]);
+
+  const openAddSupplierModal = async () => {
+    try {
+      const res = await getNextSupplierCode();
+      // Backend returns a plain string (e.g. "SUP009"), not a JSON object
+      const code = typeof res === 'string' ? res : (res?.nextSupplierCode || res?.code || '');
+      setSupplierForm({ ...emptySupplier, supplierCode: code });
+    } catch {
+      setSupplierForm(emptySupplier);
+    }
+    setEditingSupplier(null);
+    setSupplierModalOpen(true);
+  };
+
+  const openEditSupplierModal = (sup) => {
+    setEditingSupplier(sup);
+    setSupplierForm({
+      supplierCode: sup.supplierCode || '',
+      name: sup.name || '',
+      contactPerson: sup.contactPerson || '',
+      email: sup.email || '',
+      phone: sup.phone || '',
+      address: sup.address || '',
+      category: sup.category || 'Building Materials',
+      suppliedItems: sup.suppliedItems || '',
+      paymentTerms: sup.paymentTerms || 'Net 30 Days',
+      status: sup.status || 'ACTIVE',
+      notes: sup.notes || '',
+    });
+    setSupplierModalOpen(true);
+  };
+
+  const saveSupplierSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingSupplier) {
+        await updateSupplier(editingSupplier.id, supplierForm);
+        report(`Supplier '${supplierForm.name}' updated successfully.`);
+      } else {
+        await createSupplier(supplierForm);
+        report(`Supplier '${supplierForm.name}' (${supplierForm.supplierCode}) registered successfully.`);
+      }
+      setSupplierModalOpen(false);
+      setEditingSupplier(null);
+      setSupplierForm(emptySupplier);
+      await refreshData();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const deleteSupplierClick = async (sup) => {
+    if (!window.confirm(`Are you sure you want to delete supplier "${sup.name}" (${sup.supplierCode})?`)) {
+      return;
+    }
+    try {
+      await deleteSupplier(sup.id);
+      report(`Supplier "${sup.name}" deleted.`);
+      await refreshData();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const handleOrderFromSupplier = (sup) => {
+    // Check if any material is associated with this supplier
+    const matchingMat = materials.find(
+      (m) => m.supplier && m.supplier.toLowerCase().includes(sup.name.toLowerCase())
+    );
+
+    setPoForm({
+      materialId: matchingMat ? String(matchingMat.id) : (materials[0] ? String(materials[0].id) : ''),
+      supplier: sup.name,
+      quantity: '100',
+      unitPrice: matchingMat && matchingMat.unitPrice ? String(matchingMat.unitPrice) : '',
+      expectedDeliveryDate: '',
+      notes: `Order placed to ${sup.name} (${sup.phone || sup.email || ''}) | Payment terms: ${sup.paymentTerms || 'Net 30 Days'}`,
+    });
+    setTab('purchase_orders');
+    report(`Initiated purchase order with supplier "${sup.name}". Review items and dispatch order.`);
+  };
+
+  const filteredReportMaterials = materials.filter((m) => {
+    if (reportCategory !== 'ALL' && m.category !== reportCategory) return false;
+    if (reportStatus === 'LOW_STOCK' && (m.quantity > m.minStockLevel || m.quantity <= 0)) return false;
+    if (reportStatus === 'OUT_OF_STOCK' && m.quantity > 0) return false;
+    if (reportStatus === 'IN_STOCK' && m.quantity <= m.minStockLevel) return false;
+    if (reportSearch) {
+      const q = reportSearch.toLowerCase();
+      return (m.name?.toLowerCase().includes(q) || m.materialCode?.toLowerCase().includes(q) || m.supplier?.toLowerCase().includes(q));
+    }
+    return true;
+  });
+
+  const filteredReportRequests = requests.filter((r) => {
+    if (reportProject !== 'ALL' && String(r.project?.id) !== String(reportProject)) return false;
+    if (reportStatus !== 'ALL' && r.status !== reportStatus) return false;
+    if (reportSearch) {
+      const q = reportSearch.toLowerCase();
+      return (r.requestCode?.toLowerCase().includes(q) || r.material?.name?.toLowerCase().includes(q) || r.requestedBy?.toLowerCase().includes(q) || r.project?.name?.toLowerCase().includes(q));
+    }
+    return true;
+  });
+
+  const filteredReportPOs = purchaseOrders.filter((p) => {
+    if (reportStatus !== 'ALL' && p.status !== reportStatus) return false;
+    if (reportSearch) {
+      const q = reportSearch.toLowerCase();
+      return (p.poNumber?.toLowerCase().includes(q) || p.supplier?.toLowerCase().includes(q) || p.material?.name?.toLowerCase().includes(q));
+    }
+    return true;
+  });
+
+  const filteredReportAlerts = stockAlerts.filter((a) => {
+    if (reportStatus !== 'ALL' && a.status !== reportStatus) return false;
+    if (reportSearch) {
+      const q = reportSearch.toLowerCase();
+      return (a.material?.name?.toLowerCase().includes(q) || a.siteLocation?.toLowerCase().includes(q) || a.reportedBy?.toLowerCase().includes(q));
+    }
+    return true;
+  });
+
+  const exportReportToCSV = () => {
+    const filename = `inventory-${reportType}-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    let rows = [];
+
+    if (reportType === 'inventory_stock') {
+      rows.push(['Material Code', 'Material Name', 'Category', 'Quantity', 'Unit', 'Unit Price ($)', 'Total Value ($)', 'Min Stock Level', 'Status', 'Location', 'Supplier']);
+      filteredReportMaterials.forEach((m) => {
+        const val = Number((m.quantity || 0) * (m.unitPrice || 0)).toFixed(2);
+        rows.push([m.materialCode || '', m.name || '', m.category || '', m.quantity || 0, m.unit || '', m.unitPrice || 0, val, m.minStockLevel || 0, m.status || '', m.location || '', m.supplier || '']);
+      });
+    } else if (reportType === 'consumption') {
+      rows.push(['Project', 'Material Name', 'Consumed Quantity', 'Unit', 'Total Cost ($)', 'Transactions Count']);
+      if (consumptionData?.breakdown) {
+        consumptionData.breakdown.forEach((item) => {
+          rows.push([consumptionData.projectName || 'Project', item.materialName || '', item.consumedQuantity || 0, item.unit || '', Number(item.totalCost || 0).toFixed(2), item.transactionCount || 0]);
+        });
+      }
+    } else if (reportType === 'requests') {
+      rows.push(['Request Code', 'Date', 'Project', 'Material', 'Requested Qty', 'Issued Qty', 'Unit', 'Status', 'Requested By', 'Approved By', 'Remarks']);
+      filteredReportRequests.forEach((r) => {
+        rows.push([r.requestCode || `#REQ-${r.id}`, formatDate(r.requestDate || r.createdAt), r.project?.name || '', r.material?.name || '', r.requestedQuantity || r.quantity || 0, r.issuedQuantity || 0, r.material?.unit || '', r.status || '', r.requestedBy || '', r.approvedBy || '', r.remarks || '']);
+      });
+    } else if (reportType === 'purchase_orders') {
+      rows.push(['PO Number', 'Order Date', 'Supplier', 'Material', 'Quantity', 'Unit Price ($)', 'Total Cost ($)', 'Status', 'Delivery Date']);
+      filteredReportPOs.forEach((p) => {
+        const total = Number(p.totalCost || (p.quantity * p.unitPrice) || 0).toFixed(2);
+        rows.push([p.poNumber || '', formatDate(p.orderDate || p.createdAt), p.supplier || '', p.material?.name || '', p.quantity || 0, p.unitPrice || 0, total, p.status || '', formatDate(p.expectedDeliveryDate)]);
+      });
+    } else if (reportType === 'site_alerts') {
+      rows.push(['Date', 'Material', 'Site Location', 'Urgency', 'Site Stock', 'Requested Qty', 'Status', 'Reported By', 'Notes']);
+      filteredReportAlerts.forEach((a) => {
+        rows.push([formatDate(a.createdAt), a.material?.name || '', a.siteLocation || '', a.urgency || '', a.currentSiteStock ?? '', a.requestedQuantity ?? '', a.status || '', a.reportedBy || '', a.notes || '']);
+      });
+    }
+
+    const processRow = (row) => row.map((val) => {
+      let innerValue = val === null || val === undefined ? '' : String(val);
+      let result = innerValue.replace(/"/g, '""');
+      if (result.search(/("|,|\n)/g) >= 0) result = `"${result}"`;
+      return result;
+    }).join(',');
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map(processRow).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrintReport = () => {
+    window.print();
+  };
+
   return (
     <div className="light-site-wrapper">
       <Navbar />
@@ -383,7 +632,7 @@ export default function InventoryManagerDashboard() {
             <span className="brand-green-subtitle">CONSTRUCTION SUPPLY CHAIN</span>
             <h1>Material &amp; Inventory Workspace</h1>
             <p>
-              Register materials, track warehouse stock &amp; low stock alerts, manage project requests &amp; approvals, record issuance transactions, and replenish stock with purchase orders.
+              Register materials, track warehouse stock &amp; low stock alerts, manage suppliers, order goods, handle project requests, and manage purchase orders.
             </p>
           </div>
         </section>
@@ -407,6 +656,17 @@ export default function InventoryManagerDashboard() {
             className={tab === 'add_material' ? 'active' : ''}
           >
             {editingMaterial ? 'Edit Material' : 'Register Material'}
+          </button>
+          <button
+            onClick={() => setTab('suppliers')}
+            className={tab === 'suppliers' ? 'active' : ''}
+            style={{
+              background: tab === 'suppliers' ? '#047857' : '',
+              color: tab === 'suppliers' ? '#ffffff' : '',
+              fontWeight: 600,
+            }}
+          >
+            Suppliers ({suppliers.length})
           </button>
           <button
             onClick={() => setTab('requests')}
@@ -435,7 +695,19 @@ export default function InventoryManagerDashboard() {
               fontWeight: stockAlerts.filter(a => a.status === 'PENDING').length > 0 ? 700 : 500,
             }}
           >
-            🚨 Site Manager Alerts ({stockAlerts.filter(a => a.status === 'PENDING').length})
+            Site Manager Alerts ({stockAlerts.filter(a => a.status === 'PENDING').length})
+          </button>
+          <button
+            onClick={() => setTab('reports')}
+            className={tab === 'reports' ? 'active' : ''}
+            style={{
+              background: tab === 'reports' ? '#047857' : '#ecfdf5',
+              color: tab === 'reports' ? '#ffffff' : '#047857',
+              fontWeight: 700,
+              border: '1px solid #a7f3d0',
+            }}
+          >
+            Reports &amp; Analytics
           </button>
         </nav>
 
@@ -460,6 +732,7 @@ export default function InventoryManagerDashboard() {
               <MetricBox label="Inventory value" value={formatMoney(summary.totalStockValue || 0)} />
               <MetricBox label="Pending requests" value={summary.pendingRequestsCount ?? 0} />
               <MetricBox label="Active purchase orders" value={summary.activePurchaseOrdersCount ?? 0} />
+              <MetricBox label="Saved Suppliers" value={suppliers.length} />
             </section>
 
             {/* Step 4: Low Stock Alert Banner */}
@@ -528,16 +801,22 @@ export default function InventoryManagerDashboard() {
                     Register new material
                   </button>
                   <button
+                    onClick={openAddSupplierModal}
+                    style={{ padding: '12px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    + Register new supplier
+                  </button>
+                  <button
+                    onClick={() => setTab('suppliers')}
+                    style={{ padding: '12px 16px', background: '#f3f4f6', color: '#111827', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    Manage suppliers &amp; order goods
+                  </button>
+                  <button
                     onClick={() => setTab('requests')}
                     style={{ padding: '12px 16px', background: '#f3f4f6', color: '#111827', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
                   >
                     Review material requests
-                  </button>
-                  <button
-                    onClick={() => setTab('transactions')}
-                    style={{ padding: '12px 16px', background: '#f3f4f6', color: '#111827', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}
-                  >
-                    View consumption costs
                   </button>
                   <button
                     onClick={() => setTab('purchase_orders')}
@@ -822,12 +1101,24 @@ export default function InventoryManagerDashboard() {
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: '#374151' }}>
                   Supplier Name
                 </label>
+                <select
+                  value={materialForm.supplier}
+                  onChange={(e) => setMaterialForm({ ...materialForm, supplier: e.target.value })}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
+                >
+                  <option value="">-- Choose Registered Supplier or Type Below --</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.name}>
+                      {s.name} ({s.category})
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="text"
                   value={materialForm.supplier}
                   onChange={(e) => setMaterialForm({ ...materialForm, supplier: e.target.value })}
-                  placeholder="e.g. Tokyo Cement Lanka / Kelani Cables"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  placeholder="Or enter custom supplier name..."
+                  style={{ width: '100%', marginTop: '6px', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb', fontSize: '0.8rem', background: '#f9fafb', boxSizing: 'border-box' }}
                 />
               </div>
 
@@ -862,7 +1153,7 @@ export default function InventoryManagerDashboard() {
                   type="submit"
                   style={{ padding: '12px 24px', background: '#047857', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
                 >
-                  {editingMaterial ? '💾 Save Material Details' : '✅ Register Material'}
+                  {editingMaterial ? 'Save Material Details' : 'Register Material'}
                 </button>
                 <button
                   type="button"
@@ -876,108 +1167,276 @@ export default function InventoryManagerDashboard() {
           </div>
         )}
 
-        {/* TAB 4: PROJECT REQUESTS & APPROVALS (STEPS 5, 6, 7) */}
-        {tab === 'requests' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
-            {/* Step 5: Request Form */}
-            <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.2rem' }}>
-                Project material requests
-              </h3>
-              <p style={{ color: '#6b7280', fontSize: '0.85rem', margin: '0 0 16px' }}>
-                Example: ABC Project requests 200 bags of cement.
-              </p>
-
-              <form onSubmit={submitRequest} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
-                    Construction Project *
-                  </label>
-                  <select
-                    value={requestForm.projectId}
-                    onChange={(e) => setRequestForm({ ...requestForm, projectId: e.target.value })}
-                    required
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
-                  >
-                    <option value="">-- Select Project --</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
-                    Material to Request *
-                  </label>
-                  <select
-                    value={requestForm.materialId}
-                    onChange={(e) => setRequestForm({ ...requestForm, materialId: e.target.value })}
-                    required
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
-                  >
-                    <option value="">-- Select Material --</option>
-                    {materials.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} (In Stock: {m.quantity} {m.unit})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
-                    Requested Quantity *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.1"
-                    placeholder="e.g. 200"
-                    value={requestForm.requestedQuantity}
-                    onChange={(e) => setRequestForm({ ...requestForm, requestedQuantity: e.target.value })}
-                    required
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
-                    Requested By (Employee / Engineer)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Kasun Perera (Site Engineer)"
-                    value={requestForm.requestedBy}
-                    onChange={(e) => setRequestForm({ ...requestForm, requestedBy: e.target.value })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
-                    Purpose / Site Remarks
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Foundation casting, structural beam work"
-                    value={requestForm.remarks}
-                    onChange={(e) => setRequestForm({ ...requestForm, remarks: e.target.value })}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  style={{ padding: '12px 16px', background: '#047857', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', marginTop: '4px' }}
-                >
-                  Submit material request
-                </button>
-              </form>
+        {/* TAB: SUPPLIER DIRECTORY & GOODS PROCUREMENT */}
+        {tab === 'suppliers' && (
+          <div>
+            {/* Header Strip */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+              <div>
+                <h2 style={{ margin: 0, color: '#111827', fontSize: '1.4rem' }}>
+                  Suppliers Directory &amp; Goods Procurement
+                </h2>
+                <p style={{ color: '#6b7280', fontSize: '0.9rem', margin: '4px 0 0' }}>
+                  Add and manage verified suppliers. When materials are needed, click "Order Goods" to purchase directly through them.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openAddSupplierModal}
+                style={{
+                  padding: '10px 20px',
+                  background: '#047857',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 2px 4px rgba(4,120,87,0.25)',
+                }}
+              >
+                + Register New Supplier
+              </button>
             </div>
 
+            {/* KPI Cards Strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ background: '#ffffff', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 700, textTransform: 'uppercase' }}>Total Suppliers</span>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#111827', marginTop: '4px' }}>{suppliers.length}</div>
+              </div>
+              <div style={{ background: '#ffffff', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                <span style={{ fontSize: '0.75rem', color: '#047857', fontWeight: 700, textTransform: 'uppercase' }}>Active Vendors</span>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#047857', marginTop: '4px' }}>
+                  {suppliers.filter((s) => s.status === 'ACTIVE').length}
+                </div>
+              </div>
+              <div style={{ background: '#ffffff', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                <span style={{ fontSize: '0.75rem', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>Categories Covered</span>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#2563eb', marginTop: '4px' }}>
+                  {new Set(suppliers.map((s) => s.category).filter(Boolean)).size}
+                </div>
+              </div>
+              <div style={{ background: '#ffffff', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                <span style={{ fontSize: '0.75rem', color: '#b45309', fontWeight: 700, textTransform: 'uppercase' }}>Purchase Orders Placed</span>
+                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#b45309', marginTop: '4px' }}>
+                  {purchaseOrders.length}
+                </div>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', gap: '12px', flex: 1, minWidth: '320px', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  placeholder="Search supplier name, code, contact person, phone, or goods supplied..."
+                  value={supplierSearch}
+                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                />
+                <select
+                  value={supplierCategoryFilter}
+                  onChange={(e) => setSupplierCategoryFilter(e.target.value)}
+                  style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem', background: '#fff' }}
+                >
+                  <option value="ALL">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={supplierStatusFilter}
+                  onChange={(e) => setSupplierStatusFilter(e.target.value)}
+                  style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem', background: '#fff' }}
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active Only</option>
+                  <option value="INACTIVE">Inactive Only</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Supplier Cards Grid */}
+            {filteredSuppliers.length === 0 ? (
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', border: '1px dashed #d1d5db' }}>
+                <h4 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem' }}>No suppliers found</h4>
+                <p style={{ color: '#6b7280', margin: '0 0 20px', fontSize: '0.9rem' }}>
+                  {supplierSearch || supplierCategoryFilter !== 'ALL' || supplierStatusFilter !== 'ALL'
+                    ? 'No suppliers match your filter criteria. Try resetting filters.'
+                    : 'Get started by adding your verified suppliers to order goods with ease.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={openAddSupplierModal}
+                  style={{ padding: '10px 20px', background: '#047857', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  + Register First Supplier
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
+                {filteredSuppliers.map((sup) => (
+                  <div
+                    key={sup.id}
+                    style={{
+                      background: '#ffffff',
+                      borderRadius: '12px',
+                      border: '1px solid #e5e7eb',
+                      padding: '20px',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div>
+                      {/* Top Code and Status */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                        <div>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '2px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                            {sup.supplierCode}
+                          </span>
+                          <h3 style={{ margin: '6px 0 0', fontSize: '1.2rem', color: '#111827', fontWeight: 700 }}>
+                            {sup.name}
+                          </h3>
+                        </div>
+                        <span style={{
+                          padding: '3px 10px',
+                          borderRadius: '12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          background: sup.status === 'ACTIVE' ? '#dcfce7' : '#f3f4f6',
+                          color: sup.status === 'ACTIVE' ? '#166534' : '#6b7280',
+                        }}>
+                          {sup.status}
+                        </span>
+                      </div>
+
+                      {/* Category Badge */}
+                      <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: '12px' }}>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>{sup.category || 'General Supplier'}</span>
+                      </div>
+
+                      {/* Contact Details Grid */}
+                      <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '12px', border: '1px solid #f3f4f6', marginBottom: '14px', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {sup.contactPerson && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#374151' }}>
+                            <span>Contact: <b>{sup.contactPerson}</b></span>
+                          </div>
+                        )}
+                        {sup.phone && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#374151' }}>
+                            <span>Phone: <a href={`tel:${sup.phone}`} style={{ color: '#047857', textDecoration: 'none', fontWeight: 600 }}>{sup.phone}</a></span>
+                          </div>
+                        )}
+                        {sup.email && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#374151' }}>
+                            <span>Email: <a href={`mailto:${sup.email}`} style={{ color: '#047857', textDecoration: 'none' }}>{sup.email}</a></span>
+                          </div>
+                        )}
+                        {sup.address && (
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', color: '#4b5563' }}>
+                            <span>{sup.address}</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#6b7280', marginTop: '2px', borderTop: '1px dashed #e5e7eb', paddingTop: '6px' }}>
+                          <span>Terms: <b style={{ color: '#111827' }}>{sup.paymentTerms || 'Net 30 Days'}</b></span>
+                        </div>
+                      </div>
+
+                      {/* Supplied Goods list */}
+                      {sup.suppliedItems && (
+                        <div style={{ marginBottom: '14px', fontSize: '0.8rem' }}>
+                          <span style={{ color: '#6b7280', fontWeight: 600 }}>Supplied Goods / Items:</span>
+                          <p style={{ margin: '4px 0 0', color: '#1f2937', background: '#f0fdf4', padding: '8px 10px', borderRadius: '6px', border: '1px solid #dcfce7', lineHeight: '1.4' }}>
+                            {sup.suppliedItems}
+                          </p>
+                        </div>
+                      )}
+
+                      {sup.notes && (
+                        <div style={{ marginBottom: '14px', fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>
+                          Note: {sup.notes}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleOrderFromSupplier(sup)}
+                        style={{
+                          flex: 1,
+                          padding: '10px 14px',
+                          background: '#047857',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: '0 1px 3px rgba(4,120,87,0.3)',
+                        }}
+                        title="Create purchase order through this supplier"
+                      >
+                        Order Goods
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditSupplierModal(sup)}
+                        style={{
+                          padding: '10px 12px',
+                          background: '#f3f4f6',
+                          color: '#374151',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '8px',
+                          fontWeight: 600,
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                        }}
+                        title="Edit supplier profile"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteSupplierClick(sup)}
+                        style={{
+                          padding: '10px 12px',
+                          background: '#fee2e2',
+                          color: '#991b1b',
+                          border: '1px solid #fecaca',
+                          borderRadius: '8px',
+                          fontWeight: 600,
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                        }}
+                        title="Delete supplier"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 4: PROJECT REQUESTS & APPROVALS (STEPS 5, 6, 7) */}
+        {tab === 'requests' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Step 6: Requests Review & Approvals */}
             <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
               <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.2rem' }}>
@@ -1082,7 +1541,7 @@ export default function InventoryManagerDashboard() {
 
             {/* Issuing Modal Form */}
             {issuingRequest && (
-              <div style={{ gridColumn: 'span 2', background: '#ecfdf5', borderRadius: '12px', padding: '20px', border: '2px solid #047857' }}>
+              <div style={{ background: '#ecfdf5', borderRadius: '12px', padding: '20px', border: '2px solid #047857' }}>
                 <h4 style={{ margin: '0 0 8px', color: '#065f46' }}>
                   Confirm material issuance for {issuingRequest.project?.name}
                 </h4>
@@ -1331,17 +1790,67 @@ export default function InventoryManagerDashboard() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '4px' }}>
-                    Supplier Name *
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                      Supplier Name *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={openAddSupplierModal}
+                      style={{ background: 'none', border: 'none', color: '#047857', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      + Add New Supplier
+                    </button>
+                  </div>
+                  <select
+                    value={poForm.supplier}
+                    onChange={(e) => {
+                      const selectedName = e.target.value;
+                      const supObj = suppliers.find((s) => s.name === selectedName);
+                      setPoForm({
+                        ...poForm,
+                        supplier: selectedName,
+                        notes: supObj && !poForm.notes
+                          ? `Order via ${supObj.name} (${supObj.phone || ''}) | Terms: ${supObj.paymentTerms || 'Net 30 Days'}`
+                          : poForm.notes,
+                      });
+                    }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}
+                  >
+                    <option value="">-- Choose Registered Supplier or Type Below --</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.name}>
+                        {s.name} ({s.supplierCode}) - {s.category} [{s.status}]
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="text"
-                    placeholder="e.g. Tokyo Cement Lanka / Dulux Paints"
+                    placeholder="Or type custom supplier name..."
                     value={poForm.supplier}
                     onChange={(e) => setPoForm({ ...poForm, supplier: e.target.value })}
                     required
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
+                    style={{ width: '100%', marginTop: '6px', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e5e7eb', fontSize: '0.82rem', background: '#f9fafb', boxSizing: 'border-box' }}
                   />
+
+                  {/* Registered Supplier Details Chip */}
+                  {(() => {
+                    const activeSup = suppliers.find((s) => s.name.toLowerCase() === (poForm.supplier || '').toLowerCase());
+                    if (!activeSup) return null;
+                    return (
+                      <div style={{ marginTop: '8px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '0.78rem' }}>
+                        <div style={{ fontWeight: 600, color: '#166534' }}>
+                          {activeSup.name} ({activeSup.supplierCode}) &bull; <span style={{ color: '#047857' }}>{activeSup.category}</span>
+                        </div>
+                        <div style={{ color: '#374151', marginTop: '2px' }}>
+                          Contact: <b>{activeSup.contactPerson || 'N/A'}</b> | {activeSup.phone || 'N/A'} | {activeSup.email || 'N/A'}
+                        </div>
+                        <div style={{ color: '#4b5563', marginTop: '2px' }}>
+                          Terms: <b>{activeSup.paymentTerms || 'Standard'}</b> | Supplied: <i>{activeSup.suppliedItems || 'Various'}</i>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -1488,7 +1997,7 @@ export default function InventoryManagerDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.3rem' }}>
-                  🚨 Direct Stock Alerts &amp; Low Stock Reports from Site Manager
+                  Direct Stock Alerts &amp; Low Stock Reports from Site Manager
                 </h3>
                 <p style={{ color: '#6b7280', margin: 0, fontSize: '0.85rem' }}>
                   Live alerts transmitted directly by on-site managers when construction materials are running critically low.
@@ -1537,7 +2046,7 @@ export default function InventoryManagerDashboard() {
                           </h4>
                         </div>
                         <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '4px' }}>
-                          Reported by: <b>{alert.reportedBy || 'Site Manager'}</b> | 📍 Location: <b>{alert.siteLocation || 'Main Job Site'}</b> | Date: {formatDate(alert.createdAt)}
+                          Reported by: <b>{alert.reportedBy || 'Site Manager'}</b> | Location: <b>{alert.siteLocation || 'Main Job Site'}</b> | Date: {formatDate(alert.createdAt)}
                         </div>
                       </div>
 
@@ -1570,7 +2079,7 @@ export default function InventoryManagerDashboard() {
 
                     {alert.notes && (
                       <div style={{ fontSize: '0.85rem', color: '#374151', background: '#fef3c7', padding: '10px 14px', borderRadius: '6px', border: '1px solid #fde68a', marginBottom: '12px' }}>
-                        <strong>💬 Site Manager Note:</strong> "{alert.notes}"
+                        <strong>Site Manager Note:</strong> "{alert.notes}"
                       </div>
                     )}
 
@@ -1581,7 +2090,7 @@ export default function InventoryManagerDashboard() {
                           onClick={() => handleAlertStatus(alert.id, 'ACKNOWLEDGED')}
                           style={{ padding: '6px 14px', background: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
                         >
-                          👁️ Acknowledge Alert
+                          Acknowledge Alert
                         </button>
                       )}
                       {alert.status !== 'RESOLVED' && (
@@ -1598,12 +2107,801 @@ export default function InventoryManagerDashboard() {
                         onClick={() => createPOForAlert(alert)}
                         style={{ padding: '6px 14px', background: '#b45309', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
                       >
-                        📦 Create Supplier PO for this Material
+                        Create Supplier PO for this Material
                       </button>
                     </div>
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 8: REPORTS & INVENTORY ANALYTICS */}
+        {tab === 'reports' && (
+          <div>
+            {/* Header & Controls */}
+            <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+                <div>
+                  <h2 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.4rem', fontWeight: 800 }}>
+                    Material &amp; Inventory Reports Generator
+                  </h2>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.88rem' }}>
+                    Generate detailed audit summaries, track stock valuations, analyze project material consumption, and export reports to CSV or print to PDF.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={exportReportToCSV}
+                    style={{
+                      padding: '10px 18px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: '0 2px 4px rgba(4, 120, 87, 0.2)',
+                    }}
+                  >
+                    <span>📥</span> Export to CSV Spreadsheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePrintReport}
+                    style={{
+                      padding: '10px 18px',
+                      background: '#1f2937',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <span>🖨️</span> Print / Save as PDF
+                  </button>
+                </div>
+              </div>
+
+              {/* Report Type Selector Pills */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px', borderBottom: '1px solid #f3f4f6', paddingBottom: '16px' }}>
+                <button
+                  type="button"
+                  onClick={() => setReportType('inventory_stock')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: reportType === 'inventory_stock' ? '#047857' : '#f3f4f6',
+                    color: reportType === 'inventory_stock' ? '#ffffff' : '#374151',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Stock Valuation &amp; Catalog ({filteredReportMaterials.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportType('consumption')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: reportType === 'consumption' ? '#047857' : '#f3f4f6',
+                    color: reportType === 'consumption' ? '#ffffff' : '#374151',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Project Material Consumption
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportType('requests')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: reportType === 'requests' ? '#047857' : '#f3f4f6',
+                    color: reportType === 'requests' ? '#ffffff' : '#374151',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Material Requests &amp; Approvals ({filteredReportRequests.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportType('purchase_orders')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: reportType === 'purchase_orders' ? '#047857' : '#f3f4f6',
+                    color: reportType === 'purchase_orders' ? '#ffffff' : '#374151',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Purchase Orders &amp; Procurement ({filteredReportPOs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportType('site_alerts')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: reportType === 'site_alerts' ? '#047857' : '#f3f4f6',
+                    color: reportType === 'site_alerts' ? '#ffffff' : '#374151',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Site Manager Alerts ({filteredReportAlerts.length})
+                </button>
+              </div>
+
+              {/* Filters for Selected Report */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder="Search in report data..."
+                  value={reportSearch}
+                  onChange={(e) => setReportSearch(e.target.value)}
+                  style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem', minWidth: '220px' }}
+                />
+
+                {reportType === 'inventory_stock' && (
+                  <>
+                    <select
+                      value={reportCategory}
+                      onChange={(e) => setReportCategory(e.target.value)}
+                      style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem' }}
+                    >
+                      <option value="ALL">All Material Categories</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={reportStatus}
+                      onChange={(e) => setReportStatus(e.target.value)}
+                      style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem' }}
+                    >
+                      <option value="ALL">All Stock Statuses</option>
+                      <option value="IN_STOCK">In Stock (Healthy)</option>
+                      <option value="LOW_STOCK">Low Stock</option>
+                      <option value="OUT_OF_STOCK">Out of Stock</option>
+                    </select>
+                  </>
+                )}
+
+                {reportType === 'consumption' && (
+                  <select
+                    value={consumptionProjectId}
+                    onChange={async (e) => {
+                      const pid = e.target.value;
+                      setConsumptionProjectId(pid);
+                      if (pid) {
+                        const cons = await getProjectMaterialConsumption(pid).catch(() => null);
+                        setConsumptionData(cons);
+                      }
+                    }}
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem' }}
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
+
+                {(reportType === 'requests' || reportType === 'purchase_orders' || reportType === 'site_alerts') && (
+                  <select
+                    value={reportStatus}
+                    onChange={(e) => setReportStatus(e.target.value)}
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem' }}
+                  >
+                    <option value="ALL">All Statuses</option>
+                    {reportType === 'requests' && (
+                      <>
+                        <option value="PENDING">Pending Approval</option>
+                        <option value="APPROVED">Approved</option>
+                        <option value="ISSUED">Stock Issued</option>
+                        <option value="REJECTED">Rejected</option>
+                      </>
+                    )}
+                    {reportType === 'purchase_orders' && (
+                      <>
+                        <option value="ORDERED">Ordered (In Transit)</option>
+                        <option value="RECEIVED">Received &amp; Stocked</option>
+                        <option value="CANCELLED">Cancelled</option>
+                      </>
+                    )}
+                    {reportType === 'site_alerts' && (
+                      <>
+                        <option value="PENDING">Pending Attention</option>
+                        <option value="ACKNOWLEDGED">Acknowledged</option>
+                        <option value="RESOLVED">Resolved</option>
+                      </>
+                    )}
+                  </select>
+                )}
+
+                {(reportSearch || reportCategory !== 'ALL' || reportStatus !== 'ALL') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportSearch('');
+                      setReportCategory('ALL');
+                      setReportStatus('ALL');
+                    }}
+                    style={{ padding: '8px 14px', background: '#f3f4f6', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '0.85rem', cursor: 'pointer' }}
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* REPORT 1: INVENTORY STOCK & VALUATION */}
+            {reportType === 'inventory_stock' && (
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                {/* Metric Summary */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+                  <div style={{ background: '#f9fafb', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#6b7280', fontWeight: 700, textTransform: 'uppercase' }}>FILTERED SKUs</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#111827', marginTop: '4px' }}>{filteredReportMaterials.length}</div>
+                  </div>
+                  <div style={{ background: '#ecfdf5', padding: '16px', borderRadius: '10px', border: '1px solid #a7f3d0' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#065f46', fontWeight: 700, textTransform: 'uppercase' }}>TOTAL STOCK VALUE</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#065f46', marginTop: '4px' }}>
+                      {formatMoney(filteredReportMaterials.reduce((acc, m) => acc + Number((m.quantity || 0) * (m.unitPrice || 0)), 0))}
+                    </div>
+                  </div>
+                  <div style={{ background: '#fff1f2', padding: '16px', borderRadius: '10px', border: '1px solid #fecdd3' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#9f1239', fontWeight: 700, textTransform: 'uppercase' }}>LOW / OUT OF STOCK</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#9f1239', marginTop: '4px' }}>
+                      {filteredReportMaterials.filter((m) => m.quantity <= m.minStockLevel).length}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>MATERIAL CODE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>MATERIAL NAME</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>CATEGORY</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>STOCK QTY</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>UNIT PRICE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>TOTAL VALUE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>SAFETY MIN</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>STATUS</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', fontWeight: 700 }}>LOCATION</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReportMaterials.length === 0 ? (
+                        <tr>
+                          <td colSpan="9" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No materials match report criteria.</td>
+                        </tr>
+                      ) : (
+                        filteredReportMaterials.map((m) => {
+                          const totalVal = Number((m.quantity || 0) * (m.unitPrice || 0));
+                          const isLow = m.quantity <= m.minStockLevel;
+                          return (
+                            <tr key={m.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#111827' }}>{m.materialCode}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600 }}>{m.name}</td>
+                              <td style={{ padding: '10px 14px', color: '#6b7280' }}>{m.category}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: isLow ? '#dc2626' : '#111827' }}>
+                                {m.quantity} {m.unit}
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>{formatMoney(m.unitPrice || 0)}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#047857' }}>{formatMoney(totalVal)}</td>
+                              <td style={{ padding: '10px 14px', color: '#6b7280' }}>{m.minStockLevel} {m.unit}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '10px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: m.quantity <= 0 ? '#fee2e2' : isLow ? '#ffedd5' : '#dcfce7',
+                                  color: m.quantity <= 0 ? '#991b1b' : isLow ? '#c2410c' : '#166534',
+                                }}>
+                                  {m.quantity <= 0 ? 'OUT OF STOCK' : isLow ? 'LOW STOCK' : 'IN STOCK'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#6b7280', fontSize: '0.8rem' }}>{m.location || 'Warehouse'}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                    <tfoot style={{ background: '#f9fafb', borderTop: '2px solid #d1d5db', fontWeight: 800 }}>
+                      <tr>
+                        <td colSpan="3" style={{ padding: '12px 14px' }}>GRAND TOTAL ({filteredReportMaterials.length} SKUs)</td>
+                        <td style={{ padding: '12px 14px' }}>—</td>
+                        <td style={{ padding: '12px 14px' }}>—</td>
+                        <td style={{ padding: '12px 14px', color: '#047857', fontSize: '1rem' }}>
+                          {formatMoney(filteredReportMaterials.reduce((acc, m) => acc + Number((m.quantity || 0) * (m.unitPrice || 0)), 0))}
+                        </td>
+                        <td colSpan="3" style={{ padding: '12px 14px' }}>—</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* REPORT 2: PROJECT MATERIAL CONSUMPTION */}
+            {reportType === 'consumption' && (
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <h3 style={{ margin: '0 0 4px', color: '#111827' }}>
+                    Material Consumption Breakdown for: <b>{consumptionData?.projectName || 'Selected Project'}</b>
+                  </h3>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.85rem' }}>
+                    Total Material Expenditure: <strong style={{ color: '#047857' }}>{formatMoney(consumptionData?.totalMaterialCost || 0)}</strong> | Total Units Consumed: <strong>{consumptionData?.totalQuantityConsumed || 0}</strong>
+                  </p>
+                </div>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>MATERIAL</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>QUANTITY CONSUMED</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>TOTAL COST EXPENDITURE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>LOGGED TRANSACTIONS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!consumptionData?.breakdown || consumptionData.breakdown.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No materials issued or consumed for this project yet.</td>
+                        </tr>
+                      ) : (
+                        consumptionData.breakdown.map((item, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 14px', fontWeight: 600 }}>{item.materialName}</td>
+                            <td style={{ padding: '10px 14px', fontWeight: 700 }}>{item.consumedQuantity} {item.unit}</td>
+                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#047857' }}>{formatMoney(item.totalCost || 0)}</td>
+                            <td style={{ padding: '10px 14px', color: '#6b7280' }}>{item.transactionCount || 1} issuance(s)</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* REPORT 3: MATERIAL REQUESTS & APPROVALS AUDIT */}
+            {reportType === 'requests' && (
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>CODE &amp; DATE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>PROJECT</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>MATERIAL</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>QTY REQUESTED</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>QTY ISSUED</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>REQUESTED BY</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>STATUS</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>REMARKS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReportRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No material requests match report criteria.</td>
+                        </tr>
+                      ) : (
+                        filteredReportRequests.map((r) => {
+                          const statusColor = r.status === 'APPROVED' ? '#dbeafe' : r.status === 'ISSUED' ? '#dcfce7' : r.status === 'REJECTED' ? '#fee2e2' : '#fef3c7';
+                          const statusTextColor = r.status === 'APPROVED' ? '#1e40af' : r.status === 'ISSUED' ? '#166534' : r.status === 'REJECTED' ? '#991b1b' : '#92400e';
+                          return (
+                            <tr key={r.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '10px 14px' }}>
+                                <strong>{r.requestCode || `#REQ-${r.id}`}</strong>
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{formatDate(r.requestDate || r.createdAt)}</div>
+                              </td>
+                              <td style={{ padding: '10px 14px' }}>{r.project?.name || 'Site'}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600 }}>{r.material?.name || 'Material'}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700 }}>{r.requestedQuantity || r.quantity} {r.material?.unit}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: r.issuedQuantity > 0 ? '#059669' : '#6b7280' }}>
+                                {r.issuedQuantity || 0} {r.material?.unit}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#4b5563' }}>{r.requestedBy || 'Site Engineer'}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, background: statusColor, color: statusTextColor }}>
+                                  {r.status}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#6b7280', fontSize: '0.8rem' }}>{r.remarks || '—'}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* REPORT 4: PURCHASE ORDERS & PROCUREMENT SPENDING */}
+            {reportType === 'purchase_orders' && (
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>PO NUMBER &amp; DATE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>SUPPLIER</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>MATERIAL</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>QTY ORDERED</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>UNIT PRICE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>TOTAL COST</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>STATUS</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>DELIVERY DATE</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReportPOs.length === 0 ? (
+                        <tr>
+                          <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No purchase orders match report criteria.</td>
+                        </tr>
+                      ) : (
+                        filteredReportPOs.map((p) => {
+                          const total = Number(p.totalCost || (p.quantity * p.unitPrice) || 0);
+                          return (
+                            <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '10px 14px' }}>
+                                <strong>{p.poNumber || `#PO-${p.id}`}</strong>
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{formatDate(p.orderDate || p.createdAt)}</div>
+                              </td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600 }}>{p.supplier}</td>
+                              <td style={{ padding: '10px 14px' }}>{p.material?.name}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700 }}>{p.quantity} {p.material?.unit}</td>
+                              <td style={{ padding: '10px 14px' }}>{formatMoney(p.unitPrice || 0)}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 700, color: '#047857' }}>{formatMoney(total)}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '10px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: p.status === 'RECEIVED' ? '#dcfce7' : '#fffbeb',
+                                  color: p.status === 'RECEIVED' ? '#166534' : '#b45309',
+                                }}>
+                                  {p.status}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', color: '#6b7280' }}>{formatDate(p.expectedDeliveryDate) || '—'}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* REPORT 5: SITE MANAGER LOW STOCK ALERTS HISTORY */}
+            {reportType === 'site_alerts' && (
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                    <thead style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                      <tr>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>DATE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>MATERIAL</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>SITE LOCATION</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>URGENCY</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>REPORTED STOCK</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>REQUESTED REPLENISHMENT</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>STATUS</th>
+                        <th style={{ padding: '12px 14px', color: '#374151' }}>REPORTED BY</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReportAlerts.length === 0 ? (
+                        <tr>
+                          <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No site manager alerts match report criteria.</td>
+                        </tr>
+                      ) : (
+                        filteredReportAlerts.map((a) => (
+                          <tr key={a.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '10px 14px', color: '#374151' }}>{formatDate(a.createdAt)}</td>
+                            <td style={{ padding: '10px 14px', fontWeight: 600 }}>{a.material?.name}</td>
+                            <td style={{ padding: '10px 14px', color: '#4b5563' }}>{a.siteLocation}</td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                background: a.urgency === 'HIGH' || a.urgency === 'CRITICAL' ? '#fee2e2' : '#fef3c7',
+                                color: a.urgency === 'HIGH' || a.urgency === 'CRITICAL' ? '#991b1b' : '#92400e',
+                              }}>
+                                {a.urgency}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', fontWeight: 700, color: '#dc2626' }}>
+                              {a.currentSiteStock !== null ? `${a.currentSiteStock} ${a.material?.unit || ''}` : 'Low'}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              {a.requestedQuantity ? `${a.requestedQuantity} ${a.material?.unit || ''}` : '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                background: a.status === 'RESOLVED' ? '#dcfce7' : '#fffbeb',
+                                color: a.status === 'RESOLVED' ? '#166534' : '#b45309',
+                              }}>
+                                {a.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', color: '#6b7280' }}>{a.reportedBy || 'Site Lead'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ADD / EDIT SUPPLIER MODAL */}
+        {supplierModalOpen && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px',
+            backdropFilter: 'blur(3px)',
+          }}>
+            <div style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '680px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25)',
+              padding: '28px',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '14px' }}>
+                <div>
+                  <h3 style={{ margin: 0, color: '#111827', fontSize: '1.25rem', fontWeight: 700 }}>
+                    {editingSupplier ? `Edit Supplier (${editingSupplier.name})` : 'Register New Construction Supplier'}
+                  </h3>
+                  <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                    Save vendor details, catalog, and payment terms for streamlined replenishment ordering.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSupplierModalOpen(false)}
+                  style={{ background: 'none', border: 'none', fontSize: '1.6rem', color: '#9ca3af', cursor: 'pointer', lineHeight: 1 }}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <form onSubmit={saveSupplierSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Supplier Code (Auto-Generated)
+                  </label>
+                  <div style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #e5e7eb',
+                    background: '#f9fafb',
+                    color: '#047857',
+                    fontWeight: 700,
+                    fontSize: '0.95rem',
+                    boxSizing: 'border-box',
+                    letterSpacing: '0.04em',
+                  }}>
+                    {supplierForm.supplierCode || 'Generating...'}
+                  </div>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.72rem', color: '#9ca3af' }}>
+                    Supplier code is automatically assigned — no input needed.
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Supplier / Company Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierForm.name}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                    placeholder="e.g. Tokyo Super Cement Lanka"
+                    required
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Primary Category *
+                  </label>
+                  <select
+                    value={supplierForm.category}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, category: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
+                  >
+                    {categories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Status *
+                  </label>
+                  <select
+                    value={supplierForm.status}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
+                  >
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="INACTIVE">INACTIVE</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Contact Person
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierForm.contactPerson}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })}
+                    placeholder="e.g. Nimal Perera (Sales Director)"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Phone Number *
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierForm.phone}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })}
+                    placeholder="e.g. +94 11 234 5678"
+                    required
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={supplierForm.email}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })}
+                    placeholder="e.g. sales@tokyocement.lk"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Payment Terms
+                  </label>
+                  <select
+                    value={supplierForm.paymentTerms}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, paymentTerms: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
+                  >
+                    {PAYMENT_TERMS_OPTIONS.map((term) => (
+                      <option key={term} value={term}>{term}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Supplied Goods &amp; Items (Catalog)
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierForm.suppliedItems}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, suppliedItems: e.target.value })}
+                    placeholder="e.g. Portland Cement, Ready-mix concrete, Mortar, Masonry Sand"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Office / Warehouse Address
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierForm.address}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
+                    placeholder="e.g. No. 45, Industrial Zone, Kelaniya"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: 'span 2' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                    Internal Procurement Notes
+                  </label>
+                  <textarea
+                    rows="2"
+                    value={supplierForm.notes}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, notes: e.target.value })}
+                    placeholder="e.g. Preferred partner for bulk civil works, fast 24h delivery on demand..."
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSupplierModalOpen(false)}
+                    style={{ padding: '10px 20px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{ padding: '10px 24px', background: '#047857', color: '#ffffff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    {editingSupplier ? 'Save Changes' : 'Register Supplier'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

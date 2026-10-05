@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import { useAuth } from '../context/AuthContext';
+import InquiryThread from '../components/InquiryThread';
 import {
   getClients,
   createClient,
@@ -13,12 +15,14 @@ import {
   updateContract,
   deleteContract,
   getProjects,
-  createProject,
-  updateProject,
-  deleteProject,
+  getDesigns,
+  createDesign,
+  updateDesign,
+  deleteDesign,
   addMilestone,
   getInquiries,
-  respondToInquiry,
+  createInquiry,
+  sendInquiryMessage,
   getProjectRequests,
   forwardProjectRequestToPm,
   sendProjectRequestResponseToClient,
@@ -80,6 +84,7 @@ const isCardPayment = (p) => {
 const isBankPayment = (p) => !isCardPayment(p);
 
 export default function ClientManagerDashboard() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('summary'); // summary, clients, contracts, expiring, projects, inquiries, documents, feedbacks, payments
   const [paymentSectionTab, setPaymentSectionTab] = useState('ALL'); // 'ALL' | 'CARD' | 'BANK'
 
@@ -88,7 +93,8 @@ export default function ClientManagerDashboard() {
   const [clients, setClients] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [expiringContracts, setExpiringContracts] = useState([]);
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState([]); // Client-visible designs (from `designs` table)
+  const [realProjects, setRealProjects] = useState([]); // Real construction projects (used for payments)
   const [inquiries, setInquiries] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [feedbacks, setFeedbacks] = useState([]);
@@ -157,23 +163,17 @@ export default function ClientManagerDashboard() {
   const [savingProject, setSavingProject] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [newImageUrl, setNewImageUrl] = useState('');
-  const [projectForm, setProjectForm] = useState({
+  const EMPTY_DESIGN_FORM = {
     name: '',
     description: '',
     category: 'APARTMENTS',
-    location: '',
-    startDate: '',
-    endDate: '',
-    budget: '',
     imageUrl: '',
     imageUrls: [],
-    clientId: '',
-    status: 'IN_PROGRESS',
-    progressPercentage: 0,
-    constructionStatus: '',
+    remarks: '',
     priceRange: '',
     specifications: '',
-  });
+  };
+  const [projectForm, setProjectForm] = useState(EMPTY_DESIGN_FORM);
 
   const [milestoneModalOpen, setMilestoneModalOpen] = useState(false);
   const [milestoneProjectId, setMilestoneProjectId] = useState(null);
@@ -191,8 +191,14 @@ export default function ClientManagerDashboard() {
   const [sendingResponse, setSendingResponse] = useState(false);
   const [inquirySearch, setInquirySearch] = useState('');
   const [inquiryFilter, setInquiryFilter] = useState('ALL'); // ALL | PENDING | ANSWERED
+  const [inquiryClientFilter, setInquiryClientFilter] = useState(''); // '' = all clients
   const [inlineReplyingId, setInlineReplyingId] = useState(null);
   const [inlineReplyText, setInlineReplyText] = useState('');
+
+  // Client Manager -> Client new inquiry
+  const [composeInquiryOpen, setComposeInquiryOpen] = useState(false);
+  const [composeInquiryForm, setComposeInquiryForm] = useState({ clientId: '', subject: '', message: '' });
+  const [sendingComposeInquiry, setSendingComposeInquiry] = useState(false);
 
   const [docModalOpen, setDocModalOpen] = useState(false);
   const [docForm, setDocForm] = useState({
@@ -212,7 +218,7 @@ export default function ClientManagerDashboard() {
     projectId: '',
     amount: '',
     paymentDate: new Date().toISOString().slice(0, 10),
-    paymentMethod: 'BANK_TRANSFER',
+    paymentMethod: 'CASH',
     referenceNumber: '',
     status: 'Valid',
     notes: '',
@@ -253,12 +259,13 @@ export default function ClientManagerDashboard() {
         paymentsData,
         requestsData,
         bankDet,
+        realProjectsData,
       ] = await Promise.all([
         getDashboardSummary(),
         getClients(clientSearch),
         getContracts(),
         getExpiringContracts(60),
-        getProjects({ marketingOnly: true }),
+        getDesigns(),
         getInquiries(),
         getDocuments(),
         getFeedback(),
@@ -269,13 +276,15 @@ export default function ClientManagerDashboard() {
         }),
         getProjectRequests(),
         getBankDetails().catch(() => null),
+        getProjects({ realOnly: true }).catch(() => []),
       ]);
 
       setSummary(dashSummary);
       setClients(clientsData);
       setContracts(contractsData);
       setExpiringContracts(expiringData);
-      setProjects(projectsData);
+      setProjects(projectsData || []);
+      setRealProjects(realProjectsData || []);
       setInquiries(inquiriesData);
       setDocuments(docsData);
       setFeedbacks(feedbacksData);
@@ -508,42 +517,28 @@ export default function ClientManagerDashboard() {
         .filter((img) => Boolean(img && img.trim()))
         .slice(0, 5);
 
-      const primaryImage = cleanedImages[0] || projectForm.imageUrl || null;
-
-      const rawPrice = (projectForm.priceRange || '').trim();
-      const parsedBudget = parseFloat(rawPrice.replace(/[^0-9.]/g, '')) || (projectForm.budget ? Number(projectForm.budget) : 0);
-
       const payload = {
-        ...(editingProject || {}),
         name: projectForm.name.trim(),
-        description: projectForm.description.trim(),
         category: projectForm.category,
-        location: projectForm.location.trim(),
-        startDate: projectForm.startDate,
-        endDate: projectForm.endDate || null,
-        budget: parsedBudget,
-        imageUrl: primaryImage,
+        priceRange: (projectForm.priceRange || '').trim(),
+        description: (projectForm.description || '').trim(),
+        specifications: (projectForm.specifications || '').trim(),
+        remarks: (projectForm.remarks || '').trim(),
+        imageUrl: cleanedImages[0] || null,
         imageUrls: cleanedImages,
-        status: projectForm.status,
-        progressPercentage: Number(projectForm.progressPercentage),
-        constructionStatus: projectForm.constructionStatus,
-        priceRange: rawPrice || (parsedBudget > 0 ? formatMoney(parsedBudget) : ''),
-        specifications: projectForm.specifications.trim(),
-        marketingDesign: true,
         addedBy: 'CLIENT_MANAGER',
-        client: projectForm.clientId ? { id: Number(projectForm.clientId) } : null,
       };
       if (editingProject) {
-        await updateProject(editingProject.id, payload);
+        await updateDesign(editingProject.id, payload);
       } else {
-        await createProject(payload);
+        await createDesign(payload);
       }
-      setSuccessMsg(editingProject ? 'Property updated and shared with the assigned client!' : 'Sample property added to Browse Properties!');
+      setSuccessMsg(editingProject ? 'Design updated successfully!' : 'Design added to Browse Properties!');
       setProjectModalOpen(false);
       await loadAllData();
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err) {
-      setError(err.message || 'Error updating project');
+      setError(err.message || 'Error saving design');
     } finally {
       setSavingProject(false);
     }
@@ -572,7 +567,7 @@ export default function ClientManagerDashboard() {
   const handleDeleteProject = async (project) => {
     if (!window.confirm(`Remove "${project.name}" from the client design catalog?`)) return;
     try {
-      await deleteProject(project.id);
+      await deleteDesign(project.id);
       setSuccessMsg('Design removed from the client catalog.');
       await loadAllData();
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -580,6 +575,8 @@ export default function ClientManagerDashboard() {
       setError(err.message || 'Unable to remove this design.');
     }
   };
+
+  const managerName = user?.name || user?.displayName || user?.username || 'Client Manager';
 
   const handleRespondInquiry = async (e, inquiryId = null, text = null) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -589,9 +586,12 @@ export default function ClientManagerDashboard() {
 
     setSendingResponse(true);
     try {
-      const responderName = user?.name || user?.username || 'Client Manager';
-      await respondToInquiry(targetInquiryId, targetResponse, responderName);
-      setSuccessMsg('Response sent successfully! Client has been notified.');
+      await sendInquiryMessage(targetInquiryId, {
+        senderRole: 'CLIENT_MANAGER',
+        senderName: managerName,
+        message: targetResponse,
+      });
+      setSuccessMsg('Reply sent successfully! Client has been notified.');
       setResponseModalOpen(false);
       setInlineReplyingId(null);
       setInlineReplyText('');
@@ -609,6 +609,34 @@ export default function ClientManagerDashboard() {
       setError(err.message || 'Error responding to inquiry');
     } finally {
       setSendingResponse(false);
+    }
+  };
+
+  const openComposeInquiry = () => {
+    setComposeInquiryForm({ clientId: inquiryClientFilter || '', subject: '', message: '' });
+    setComposeInquiryOpen(true);
+  };
+
+  const handleSendComposeInquiry = async (e) => {
+    e.preventDefault();
+    const { clientId, subject, message } = composeInquiryForm;
+    if (!clientId || !subject.trim() || !message.trim()) return;
+    setSendingComposeInquiry(true);
+    try {
+      await createInquiry({
+        client: { id: Number(clientId) },
+        subject: subject.trim(),
+        message: message.trim(),
+        initiatedBy: 'CLIENT_MANAGER',
+      });
+      setComposeInquiryOpen(false);
+      setSuccessMsg('Inquiry sent to client! They can reply from their dashboard.');
+      await loadAllData();
+      setTimeout(() => setSuccessMsg(''), 4500);
+    } catch (err) {
+      setError(err.message || 'Unable to send inquiry to client');
+    } finally {
+      setSendingComposeInquiry(false);
     }
   };
 
@@ -646,7 +674,7 @@ export default function ClientManagerDashboard() {
       projectId: presetProject?.id ? String(presetProject.id) : '',
       amount: '',
       paymentDate: today,
-      paymentMethod: 'BANK_TRANSFER',
+      paymentMethod: 'CASH',
       referenceNumber: '',
       status: 'Valid',
       notes: '',
@@ -667,7 +695,7 @@ export default function ClientManagerDashboard() {
       projectId: payment.project?.id ? String(payment.project.id) : '',
       amount: String(payment.amount || ''),
       paymentDate: payment.paymentDate ? formatDate(payment.paymentDate) : new Date().toISOString().slice(0, 10),
-      paymentMethod: payment.paymentMethod || 'BANK_TRANSFER',
+      paymentMethod: payment.paymentMethod || 'CASH',
       referenceNumber: payment.referenceNumber || '',
       status: payment.status || 'Valid',
       notes: payment.notes || '',
@@ -1352,29 +1380,13 @@ export default function ClientManagerDashboard() {
             <div className="panel-card-head">
               <div>
                 <span className="brand-green-subtitle">CLIENT-VISIBLE DESIGN CATALOG</span>
-                <h3 className="panel-title">Designs, Projects &amp; Milestones</h3>
+                <h3 className="panel-title">Company Designs Catalog</h3>
                 <p className="panel-meta">Every design saved here is immediately available to clients in Browse Properties and Company Designs.</p>
               </div>
               <button type="button" className="btn-solid-green" onClick={() => {
                 setEditingProject(null);
                 setNewImageUrl('');
-                setProjectForm({
-                  name: '',
-                  description: '',
-                  category: 'APARTMENTS',
-                  location: '',
-                  startDate: new Date().toISOString().slice(0, 10),
-                  endDate: '',
-                  budget: '',
-                  imageUrl: '',
-                  imageUrls: [],
-                  clientId: '',
-                  status: 'PLANNING',
-                  progressPercentage: 0,
-                  constructionStatus: '',
-                  priceRange: '',
-                  specifications: '',
-                });
+                setProjectForm({ ...EMPTY_DESIGN_FORM });
                 setProjectModalOpen(true);
               }}>+ Add Client-Visible Design</button>
             </div>
@@ -1383,26 +1395,28 @@ export default function ClientManagerDashboard() {
               <table className="light-table">
                 <thead>
                   <tr>
-                    <th>Project</th>
+                    <th>Design</th>
                     <th>Category</th>
                     <th>Price (Client-Visible)</th>
-                    <th>Assigned Client</th>
-                    <th>Progress</th>
-                    <th>Payment Status</th>
-                    <th>Construction Status</th>
-                    <th>Milestones</th>
+                    <th>Specifications</th>
+                    <th>Remarks</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
+                  {projects.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '1.5rem' }}>
+                        No designs yet. Click "+ Add Client-Visible Design" to publish one.
+                      </td>
+                    </tr>
+                  )}
                   {projects.map((p) => {
-                    const pPayment = downPayments.find((dp) => dp.project?.id === p.id);
                     return (
                     <tr key={p.id}>
                       <td>
                         <strong>{p.name}</strong>
-                        <small style={{ display: 'block', color: 'var(--text-muted)' }}>{p.location}</small>
-                        <small style={{ display: 'inline-block', marginTop: '3px', background: '#f1f5f9', color: '#475569', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem' }}>
+                        <small style={{ display: 'block', marginTop: '3px', background: '#f1f5f9', color: '#475569', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', width: 'fit-content' }}>
                           📷 {(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls.length : (p.imageUrl ? 1 : 0)} / 5 images
                         </small>
                       </td>
@@ -1412,62 +1426,10 @@ export default function ClientManagerDashboard() {
                           {p.priceRange || (p.budget ? formatMoney(p.budget) : '—')}
                         </strong>
                       </td>
-                      <td>
-                        <strong>{p.client?.name || 'Unassigned'}</strong>
-                        <small style={{ display: 'block', color: 'var(--text-muted)' }}>{p.client?.email}</small>
-                      </td>
-                      <td>
-                        <div style={{ minWidth: '90px' }}>
-                          <span>{p.progressPercentage || 0}%</span>
-                          <div className="construction-progress-track" style={{ height: '4px' }}>
-                            <div className="construction-progress-fill" style={{ width: `${p.progressPercentage || 0}%` }} />
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        {pPayment ? (
-                          <div>
-                            <span className="pill-badge active" style={{ fontSize: '0.75rem' }}>
-                              Paid: {formatMoney(pPayment.amount)}
-                            </span>
-                            <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                              {formatDate(pPayment.paymentDate)}
-                            </small>
-                          </div>
-                        ) : (
-                          <div>
-                            <span style={{ color: '#64748b', fontSize: '0.78rem', background: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                              No Payments
-                            </span>
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ maxWidth: '240px' }}><small>{p.constructionStatus || 'In Progress'}</small></td>
-                      <td><small><b>{p.milestones?.length || 0}</b> stages</small></td>
+                      <td style={{ maxWidth: '220px' }}><small>{p.specifications || '—'}</small></td>
+                      <td style={{ maxWidth: '240px' }}><small>{p.remarks || '—'}</small></td>
                       <td>
                         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                          {pPayment ? (
-                            <button
-                              type="button"
-                              className="btn-outline-green"
-                              style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-                              onClick={() => {
-                                setActiveTab('payments');
-                                setPaymentSearch(pPayment.referenceNumber || p.name);
-                              }}
-                            >
-                              View Payments
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn-solid-green"
-                              style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem', background: '#09543b' }}
-                              onClick={() => openAddPayment(p)}
-                            >
-                              + Payment
-                            </button>
-                          )}
                           <button
                             type="button"
                             className="btn-solid-green"
@@ -1482,16 +1444,9 @@ export default function ClientManagerDashboard() {
                                 name: p.name || '',
                                 description: p.description || '',
                                 category: p.category || 'APARTMENTS',
-                                location: p.location || '',
-                                startDate: formatDate(p.startDate),
-                                endDate: formatDate(p.endDate),
-                                budget: p.budget || '',
                                 imageUrl: existingImages[0] || '',
                                 imageUrls: existingImages,
-                                clientId: p.client?.id ? String(p.client.id) : '',
-                                status: p.status || 'IN_PROGRESS',
-                                progressPercentage: p.progressPercentage || 0,
-                                constructionStatus: p.constructionStatus || '',
+                                remarks: p.remarks || '',
                                 priceRange: p.priceRange || '',
                                 specifications: p.specifications || '',
                               });
@@ -1499,18 +1454,6 @@ export default function ClientManagerDashboard() {
                             }}
                           >
                             Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-outline-green"
-                            style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-                            onClick={() => {
-                              setMilestoneProjectId(p.id);
-                              setMilestoneForm({ title: '', description: '', targetDate: '', status: 'IN_PROGRESS', progressPercentage: 0 });
-                              setMilestoneModalOpen(true);
-                            }}
-                          >
-                            + Milestone
                           </button>
                           <button
                             type="button"
@@ -1532,14 +1475,46 @@ export default function ClientManagerDashboard() {
         )}
 
         {/* TAB 6: INQUIRIES */}
-        {activeTab === 'inquiries' && (
+        {activeTab === 'inquiries' && (() => {
+          const clientScopedInquiries = inquiryClientFilter
+            ? inquiries.filter((i) => String(i.client?.id) === String(inquiryClientFilter))
+            : inquiries;
+          const inquiryClients = clients
+            .map((c) => ({ ...c, inquiryCount: inquiries.filter((i) => i.client?.id === c.id).length, pendingCount: inquiries.filter((i) => i.client?.id === c.id && i.status === 'PENDING').length }))
+            .sort((a, b) => (b.pendingCount - a.pendingCount) || (b.inquiryCount - a.inquiryCount) || (a.name || '').localeCompare(b.name || ''));
+          return (
           <div className="light-panel-card">
             <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <span className="brand-green-subtitle">CLIENT SUPPORT &amp; INQUIRIES</span>
                 <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Client Inquiries Inbox</h3>
-                <p className="panel-meta" style={{ margin: 0 }}>Review customer inquiries, consult on designs, and dispatch official replies to client dashboards.</p>
+                <p className="panel-meta" style={{ margin: 0 }}>Review customer inquiries, send new inquiries to clients, and continue conversations with them.</p>
               </div>
+              <button type="button" className="btn-solid-green" onClick={openComposeInquiry}>
+                ✉️ New Inquiry to Client
+              </button>
+            </div>
+
+            {/* Client selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+              <label style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0f172a' }}>Client:</label>
+              <select
+                value={inquiryClientFilter}
+                onChange={(e) => setInquiryClientFilter(e.target.value)}
+                style={{ minWidth: 280, padding: '0.45rem 0.7rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
+              >
+                <option value="">All Clients ({inquiries.length} inquiries)</option>
+                {inquiryClients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} — {c.inquiryCount} {c.inquiryCount === 1 ? 'inquiry' : 'inquiries'}{c.pendingCount > 0 ? ` (${c.pendingCount} pending)` : ''}
+                  </option>
+                ))}
+              </select>
+              {inquiryClientFilter && (
+                <button type="button" className="btn-outline-green" style={{ fontSize: '0.8rem', padding: '0.3rem 0.7rem' }} onClick={() => setInquiryClientFilter('')}>
+                  Show all clients
+                </button>
+              )}
             </div>
 
             {/* Inquiries Filter and Search bar */}
@@ -1551,7 +1526,7 @@ export default function ClientManagerDashboard() {
                   style={{ fontSize: '0.82rem', padding: '0.35rem 0.85rem' }}
                   onClick={() => setInquiryFilter('ALL')}
                 >
-                  All Inquiries ({inquiries.length})
+                  All Inquiries ({clientScopedInquiries.length})
                 </button>
                 <button
                   type="button"
@@ -1559,7 +1534,7 @@ export default function ClientManagerDashboard() {
                   style={{ fontSize: '0.82rem', padding: '0.35rem 0.85rem' }}
                   onClick={() => setInquiryFilter('PENDING')}
                 >
-                  Action Required ({inquiries.filter((i) => i.status === 'PENDING').length})
+                  Action Required ({clientScopedInquiries.filter((i) => i.status === 'PENDING').length})
                 </button>
                 <button
                   type="button"
@@ -1567,7 +1542,7 @@ export default function ClientManagerDashboard() {
                   style={{ fontSize: '0.82rem', padding: '0.35rem 0.85rem' }}
                   onClick={() => setInquiryFilter('ANSWERED')}
                 >
-                  Answered ({inquiries.filter((i) => i.status === 'ANSWERED').length})
+                  Awaiting Client ({clientScopedInquiries.filter((i) => i.status === 'ANSWERED').length})
                 </button>
               </div>
 
@@ -1583,7 +1558,7 @@ export default function ClientManagerDashboard() {
             </div>
 
             {(() => {
-              const filteredInquiries = inquiries.filter((inq) => {
+              const filteredInquiries = clientScopedInquiries.filter((inq) => {
                 if (inquiryFilter === 'PENDING' && inq.status !== 'PENDING') return false;
                 if (inquiryFilter === 'ANSWERED' && inq.status !== 'ANSWERED') return false;
                 if (inquirySearch.trim()) {
@@ -1634,10 +1609,13 @@ export default function ClientManagerDashboard() {
                                   📞 <a href={`tel:${inq.client.phone}`} style={{ color: '#475569' }}>{inq.client.phone}</a>
                                 </span>
                               )}
-                              {inq.project && (
+                              {(inq.design || inq.project) && (
                                 <span style={{ color: '#0369a1', fontWeight: 600 }}>
-                                  🏠 Design: {inq.project.name}
+                                  🏠 {inq.design ? 'Design' : 'Project'}: {(inq.design || inq.project).name}
                                 </span>
+                              )}
+                              {inq.initiatedBy === 'CLIENT_MANAGER' && (
+                                <span style={{ color: '#7c3aed', fontWeight: 600 }}>📤 Sent by Client Manager</span>
                               )}
                             </div>
                           </div>
@@ -1650,7 +1628,7 @@ export default function ClientManagerDashboard() {
                               border: `1px solid ${inq.status === 'ANSWERED' ? '#bbf7d0' : '#fde68a'}`,
                               padding: '0.3rem 0.75rem'
                             }}>
-                              {inq.status === 'ANSWERED' ? '✓ Answered' : 'Action Required'}
+                              {inq.status === 'ANSWERED' ? '✓ Awaiting Client Reply' : 'Action Required'}
                             </span>
                             <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>
                               📅 {inq.createdAt ? formatDate(inq.createdAt) : '-'}
@@ -1658,39 +1636,13 @@ export default function ClientManagerDashboard() {
                           </div>
                         </div>
 
-                        <div style={{ background: '#f8fafc', padding: '1rem 1.15rem', borderRadius: 8, border: '1px solid #f1f5f9', margin: '0.75rem 0' }}>
-                          <p style={{ color: '#334155', fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                            {inq.message}
-                          </p>
-                        </div>
+                        <InquiryThread inquiry={inq} viewerRole="CLIENT_MANAGER" />
 
                         {inq.attachmentData && (
                           <div style={{ marginBottom: '0.75rem' }}>
                             <a href={inq.attachmentData} download={inq.attachmentName || 'client-attachment'} className="btn-outline-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}>
                               📎 Download Client Attachment: {inq.attachmentName || 'attachment'}
                             </a>
-                          </div>
-                        )}
-
-                        {/* Existing Official Response */}
-                        {inq.response && (
-                          <div style={{
-                            marginTop: '0.85rem',
-                            marginBottom: '0.85rem',
-                            padding: '1rem 1.25rem',
-                            background: '#f0fdf4',
-                            border: '1px solid #bbf7d0',
-                            borderLeft: '4px solid #16a34a',
-                            borderRadius: '0 8px 8px 0'
-                          }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                              <small style={{ color: '#15803d', fontWeight: 700, fontSize: '0.85rem' }}>
-                                ✓ Your Reply ({formatDate(inq.respondedAt)} by {inq.respondedBy || 'Client Manager'}):
-                              </small>
-                            </div>
-                            <p style={{ color: '#0f172a', fontSize: '0.92rem', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                              {inq.response}
-                            </p>
                           </div>
                         )}
 
@@ -1786,11 +1738,11 @@ export default function ClientManagerDashboard() {
                               style={{ fontSize: '0.82rem', padding: '0.38rem 0.95rem' }}
                               onClick={() => {
                                 setActiveInquiry(inq);
-                                setResponseText(inq.response || '');
+                                setResponseText('');
                                 setResponseModalOpen(true);
                               }}
                             >
-                              {inq.response ? '✏️ Edit / Update Reply' : '💬 Reply to Client Inquiry'}
+                              💬 Reply to Client
                             </button>
 
                             <button
@@ -1799,7 +1751,7 @@ export default function ClientManagerDashboard() {
                               style={{ fontSize: '0.82rem', padding: '0.38rem 0.95rem' }}
                               onClick={() => {
                                 setInlineReplyingId(inq.id);
-                                setInlineReplyText(inq.response || '');
+                                setInlineReplyText('');
                               }}
                             >
                               Fast Inline Reply
@@ -1813,7 +1765,8 @@ export default function ClientManagerDashboard() {
               );
             })()}
           </div>
-        )}
+          );
+        })()}
 
         {/* TAB 7: DOCUMENTS */}
         {activeTab === 'documents' && (
@@ -2780,21 +2733,6 @@ export default function ClientManagerDashboard() {
                       </select>
                     </div>
                     <div className="form-input-box">
-                      <label>Location</label>
-                      <input value={projectForm.location} onChange={(e) => setProjectForm({ ...projectForm, location: e.target.value })} />
-                    </div>
-                    <div className="form-input-box">
-                      <label>Assign Client (optional)</label>
-                      <select value={projectForm.clientId} onChange={(e) => setProjectForm({ ...projectForm, clientId: e.target.value })}>
-                        <option value="">Not assigned — browse sample only</option>
-                        {clients.filter((client) => client.status === 'ACTIVE').map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-input-box">
-                      <label>Start Date *</label>
-                      <input type="date" value={projectForm.startDate} onChange={(e) => setProjectForm({ ...projectForm, startDate: e.target.value })} required />
-                    </div>
-                    <div className="form-input-box">
                       <label>Display Price *</label>
                       <input
                         placeholder="e.g. From LKR 25,000,000"
@@ -2802,23 +2740,6 @@ export default function ClientManagerDashboard() {
                         onChange={(e) => setProjectForm({ ...projectForm, priceRange: e.target.value })}
                         required
                       />
-                    </div>
-                    <div className="form-input-box">
-                      <label>Expected Completion</label>
-                      <input type="date" value={projectForm.endDate} onChange={(e) => setProjectForm({ ...projectForm, endDate: e.target.value })} />
-                    </div>
-                    <div className="form-input-box">
-                      <label>Progress (0 - 100%)</label>
-                      <input type="number" min="0" max="100" value={projectForm.progressPercentage} onChange={(e) => setProjectForm({ ...projectForm, progressPercentage: e.target.value })} required />
-                    </div>
-                    <div className="form-input-box">
-                      <label>Status</label>
-                      <select value={projectForm.status} onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value })}>
-                        <option value="PLANNING">PLANNING</option>
-                        <option value="IN_PROGRESS">IN_PROGRESS</option>
-                        <option value="ON_HOLD">ON_HOLD</option>
-                        <option value="COMPLETED">COMPLETED</option>
-                      </select>
                     </div>
                   </div>
 
@@ -2993,8 +2914,8 @@ export default function ClientManagerDashboard() {
                     <textarea rows={2} placeholder="e.g. 3 bedrooms, 2 bathrooms, 1,850 sq ft" value={projectForm.specifications} onChange={(e) => setProjectForm({ ...projectForm, specifications: e.target.value })} />
                   </div>
                   <div className="form-input-box" style={{ marginTop: '1rem' }}>
-                    <label>Status Remarks (Notified to Client)</label>
-                    <textarea rows={3} placeholder="Optional note shown to the assigned client" value={projectForm.constructionStatus} onChange={(e) => setProjectForm({ ...projectForm, constructionStatus: e.target.value })} />
+                    <label>Remarks (shown to clients)</label>
+                    <textarea rows={3} placeholder="Optional remarks shown with this design" value={projectForm.remarks} onChange={(e) => setProjectForm({ ...projectForm, remarks: e.target.value })} />
                   </div>
                 </div>
                 <div className="modal-actions-row">
@@ -3128,6 +3049,68 @@ export default function ClientManagerDashboard() {
           </div>
         )}
 
+        {composeInquiryOpen && (
+          <div className="light-modal-overlay">
+            <div className="light-modal-box" style={{ maxWidth: '640px' }}>
+              <div className="modal-head-row">
+                <h3 style={{ margin: 0, color: '#0f172a' }}>✉️ Send Inquiry to Client</h3>
+                <button type="button" onClick={() => setComposeInquiryOpen(false)}>✕</button>
+              </div>
+              <form onSubmit={handleSendComposeInquiry}>
+                <div className="modal-body-content">
+                  <div className="form-input-box">
+                    <label>Select Client *</label>
+                    <select
+                      value={composeInquiryForm.clientId}
+                      onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, clientId: e.target.value })}
+                      required
+                    >
+                      <option value="">-- Choose Target Client --</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.email || 'No email'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                    <label>Subject / Topic *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Schedule design consultation / Site inspection request"
+                      value={composeInquiryForm.subject}
+                      onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, subject: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                    <label>Message *</label>
+                    <textarea
+                      rows={5}
+                      placeholder="Write your inquiry or question to the client..."
+                      value={composeInquiryForm.message}
+                      onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, message: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <p style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.75rem', marginBottom: 0 }}>
+                    💡 The client will receive this inquiry in their Client Portal and can reply directly in the thread.
+                  </p>
+                </div>
+                <div className="modal-actions-row">
+                  <button type="button" className="btn-outline-green" onClick={() => setComposeInquiryOpen(false)}>Cancel</button>
+                  <button type="submit" className="btn-solid-green" disabled={sendingComposeInquiry}>
+                    {sendingComposeInquiry ? 'Sending...' : 'Send Inquiry to Client'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {docModalOpen && (
           <div className="light-modal-overlay">
             <div className="light-modal-box">
@@ -3201,10 +3184,11 @@ export default function ClientManagerDashboard() {
                         value={paymentForm.clientId}
                         onChange={(e) => {
                           const newClientId = e.target.value;
+                          const projectList = (realProjects && realProjects.length > 0) ? realProjects : projects;
                           setPaymentForm({
                             ...paymentForm,
                             clientId: newClientId,
-                            projectId: projects.some(p => p.id === Number(paymentForm.projectId) && p.client?.id === Number(newClientId))
+                            projectId: projectList.some(p => p.id === Number(paymentForm.projectId) && p.client?.id === Number(newClientId))
                               ? paymentForm.projectId
                               : '',
                           });
@@ -3224,7 +3208,8 @@ export default function ClientManagerDashboard() {
                         value={paymentForm.projectId}
                         onChange={(e) => {
                           const pid = e.target.value;
-                          const proj = projects.find(p => p.id === Number(pid));
+                          const projectList = (realProjects && realProjects.length > 0) ? realProjects : projects;
+                          const proj = projectList.find(p => p.id === Number(pid));
                           setPaymentForm({
                             ...paymentForm,
                             projectId: pid,
@@ -3234,7 +3219,7 @@ export default function ClientManagerDashboard() {
                         }}
                       >
                         <option value="">-- Select Project (Optional) --</option>
-                        {projects
+                        {((realProjects && realProjects.length > 0) ? realProjects : projects)
                           .filter(p => !paymentForm.clientId || !p.client?.id || p.client.id === Number(paymentForm.clientId))
                           .map((p) => (
                             <option key={p.id} value={p.id}>
@@ -3272,13 +3257,11 @@ export default function ClientManagerDashboard() {
                     <div className="form-input-box">
                       <label>Payment Method *</label>
                       <select
-                        value={paymentForm.paymentMethod}
+                        value={paymentForm.paymentMethod || 'CASH'}
                         onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
                         required
                       >
-                        <option value="BANK_TRANSFER">Bank Transfer</option>
                         <option value="CASH">Cash</option>
-                        <option value="CREDIT_CARD">Credit / Debit Card</option>
                       </select>
                     </div>
 

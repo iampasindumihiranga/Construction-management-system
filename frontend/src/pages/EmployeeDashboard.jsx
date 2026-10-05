@@ -12,6 +12,10 @@ import {
   updateTaskProgress,
   recordAttendance,
   updateEmployeeProfile,
+  getMaterials,
+  getMaterialRequests,
+  createMaterialRequest,
+  getProjects,
 } from '../services/api';
 
 const ROLES_LIST = [
@@ -96,18 +100,46 @@ export default function EmployeeDashboard() {
   const [savingTaskProgress, setSavingTaskProgress] = useState(false);
   const [taskNotice, setTaskNotice] = useState('');
 
+  // Material Request State (Site Engineer Material Requisition)
+  const [materials, setMaterials] = useState([]);
+  const [materialRequests, setMaterialRequests] = useState([]);
+  const [allProjects, setAllProjects] = useState([]);
+  const [materialRequestForm, setMaterialRequestForm] = useState({
+    projectId: '',
+    materialId: '',
+    requestedQuantity: '',
+    requiredDate: '',
+    remarks: '',
+  });
+  const [submittingMaterialReq, setSubmittingMaterialReq] = useState(false);
+  const [materialReqNotice, setMaterialReqNotice] = useState('');
+  const [materialReqError, setMaterialReqError] = useState('');
+
   const loadEmployeeData = async () => {
     if (!user) return;
     try {
       setLoading(true);
       const username = user.username;
-      const [empProfile, assignedProjs] = await Promise.all([
+      const [empProfile, assignedProjs, matsData, reqsData, allProjsData] = await Promise.all([
         getMyEmployeeProfile(username).catch(() => null),
         getMyAssignedProjects(username).catch(() => []),
+        getMaterials().catch(() => []),
+        getMaterialRequests().catch(() => []),
+        getProjects({ realOnly: true }).catch(() => []),
       ]);
 
       setProfile(empProfile);
       setProjects(assignedProjs || []);
+      setMaterials(matsData || []);
+      setMaterialRequests(reqsData || []);
+      setAllProjects(allProjsData || []);
+
+      if (assignedProjs && assignedProjs.length > 0 && !materialRequestForm.projectId) {
+        setMaterialRequestForm((prev) => ({
+          ...prev,
+          projectId: String(assignedProjs[0].id),
+        }));
+      }
 
       if (empProfile?.id) {
         const [attRecords, empTasks] = await Promise.all([
@@ -121,6 +153,47 @@ export default function EmployeeDashboard() {
       setError(err.message || 'Unable to load employee dashboard.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateMaterialRequest = async (e) => {
+    e.preventDefault();
+    if (!materialRequestForm.projectId || !materialRequestForm.materialId || !materialRequestForm.requestedQuantity) {
+      setMaterialReqError('Please select a project, material, and specify the quantity.');
+      return;
+    }
+    setSubmittingMaterialReq(true);
+    setMaterialReqNotice('');
+    setMaterialReqError('');
+
+    try {
+      const requesterTitle = `${profile?.name || user?.displayName || user?.username} (${profile?.role || profile?.position || 'Site Engineer'})`;
+      await createMaterialRequest({
+        projectId: Number(materialRequestForm.projectId),
+        materialId: Number(materialRequestForm.materialId),
+        project: { id: Number(materialRequestForm.projectId) },
+        material: { id: Number(materialRequestForm.materialId) },
+        requestedQuantity: Number(materialRequestForm.requestedQuantity),
+        requiredDate: materialRequestForm.requiredDate || null,
+        remarks: materialRequestForm.remarks.trim(),
+        requestedBy: requesterTitle,
+      });
+
+      setMaterialReqNotice('✓ Material request submitted successfully! Inventory Manager will review and issue stock.');
+      setMaterialRequestForm((prev) => ({
+        ...prev,
+        materialId: '',
+        requestedQuantity: '',
+        requiredDate: '',
+        remarks: '',
+      }));
+      const updatedReqs = await getMaterialRequests();
+      setMaterialRequests(updatedReqs || []);
+      setTimeout(() => setMaterialReqNotice(''), 5000);
+    } catch (err) {
+      setMaterialReqError(err.message || 'Failed to submit material request.');
+    } finally {
+      setSubmittingMaterialReq(false);
     }
   };
 
@@ -293,6 +366,18 @@ export default function EmployeeDashboard() {
   const attendanceRate =
     attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 100;
 
+  const availableProjects = allProjects.length > 0 ? allProjects : projects;
+  const assignedProjectIds = new Set(projects.map((p) => p.id));
+  const myMaterialRequests = materialRequests.filter((r) => {
+    if (!r) return false;
+    const requestedBy = (r.requestedBy || '').toLowerCase();
+    const username = (user?.username || '').toLowerCase();
+    const displayName = (profile?.name || user?.displayName || '').toLowerCase();
+    const isMe = (username && requestedBy.includes(username)) || (displayName && requestedBy.includes(displayName)) || requestedBy.includes('site engineer') || requestedBy.includes('site manager');
+    const isMyProject = r.project?.id && assignedProjectIds.has(r.project.id);
+    return isMe || isMyProject;
+  });
+
   return (
     <div className="light-site-wrapper">
       <Navbar />
@@ -333,8 +418,8 @@ export default function EmployeeDashboard() {
                 <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{tasks.length}</div>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.15)', padding: '12px 20px', borderRadius: '12px', textAlign: 'center' }}>
-                <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Attendance Rate</div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{attendanceRate}%</div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Material Requests</div>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{myMaterialRequests.length}</div>
               </div>
             </div>
           </div>
@@ -371,6 +456,21 @@ export default function EmployeeDashboard() {
             }}
           >
             📋 My Tasks &amp; Progress Updates ({tasks.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('materials')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: activeTab === 'materials' ? '#047857' : '#f3f4f6',
+              color: activeTab === 'materials' ? '#ffffff' : '#374151',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontSize: '0.95rem',
+            }}
+          >
+            📦 Request Site Materials ({myMaterialRequests.length})
           </button>
           <button
             onClick={() => setActiveTab('attendance')}
@@ -1353,6 +1453,244 @@ export default function EmployeeDashboard() {
                 </div>
               </form>
             )}
+          </div>
+        )}
+
+        {/* TAB 5: SITE MATERIAL REQUESTS (SITE ENGINEER PORTAL) */}
+        {activeTab === 'materials' && (
+          <div>
+            <div style={{ marginBottom: '16px' }}>
+              <h2 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.4rem' }}>
+                📦 Site Material Requisitions
+              </h2>
+              <p style={{ color: '#6b7280', margin: 0, fontSize: '0.9rem' }}>
+                Request raw materials, aggregates, concrete, and equipment directly from central warehouse inventory for site operations.
+              </p>
+            </div>
+
+            {materialReqNotice && (
+              <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0' }}>
+                {materialReqNotice}
+              </div>
+            )}
+            {materialReqError && (
+              <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
+                ⚠️ {materialReqError}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px', alignItems: 'start' }}>
+              {/* Form Card */}
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  📝 Request Materials for Site
+                </h3>
+                <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
+                  Fill out the requisition form below. Requests are routed instantly to the Inventory Manager.
+                </p>
+
+                <form onSubmit={handleCreateMaterialRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                      Target Construction Project *
+                    </label>
+                    <select
+                      value={materialRequestForm.projectId}
+                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, projectId: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                    >
+                      <option value="">-- Choose Project --</option>
+                      {availableProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.location ? `(${p.location})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                      Material Required *
+                    </label>
+                    <select
+                      value={materialRequestForm.materialId}
+                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, materialId: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                    >
+                      <option value="">-- Choose Material from Inventory --</option>
+                      {materials.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.materialCode ? `[${m.materialCode}] ` : ''}{m.name} (In Stock: {m.quantity} {m.unit || 'units'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                        Requested Quantity *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.1"
+                        placeholder="e.g. 50"
+                        value={materialRequestForm.requestedQuantity}
+                        onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, requestedQuantity: e.target.value })}
+                        required
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                        Required By Date
+                      </label>
+                      <input
+                        type="date"
+                        value={materialRequestForm.requiredDate}
+                        onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, requiredDate: e.target.value })}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                      Site Purpose &amp; Remarks
+                    </label>
+                    <textarea
+                      placeholder="E.g. Required for foundation casting, second floor slab beam reinforcement..."
+                      value={materialRequestForm.remarks}
+                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, remarks: e.target.value })}
+                      rows={3}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submittingMaterialReq}
+                    style={{
+                      padding: '12px 20px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: submittingMaterialReq ? 'not-allowed' : 'pointer',
+                      fontSize: '0.95rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 2px 4px rgba(4, 120, 87, 0.2)',
+                    }}
+                  >
+                    {submittingMaterialReq ? 'Submitting Request...' : '📨 Submit Material Requisition'}
+                  </button>
+                </form>
+              </div>
+
+              {/* History Card */}
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem' }}>
+                  📋 Requisitions &amp; Inventory Status
+                </h3>
+                <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
+                  Live tracking of requests submitted by site engineering staff.
+                </p>
+
+                {myMaterialRequests.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📦</div>
+                    <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>No Material Requests Yet</div>
+                    <div style={{ fontSize: '0.85rem' }}>Use the requisition form to request materials for active site tasks.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '560px', overflowY: 'auto' }}>
+                    {myMaterialRequests
+                      .sort((a, b) => new Date(b.requestDate || b.createdAt || 0) - new Date(a.requestDate || a.createdAt || 0))
+                      .map((req) => {
+                        const statusColor = req.status === 'APPROVED'
+                          ? { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }
+                          : req.status === 'ISSUED'
+                          ? { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }
+                          : req.status === 'REJECTED'
+                          ? { bg: '#fee2e2', text: '#991b1b', border: '#fecaca' }
+                          : { bg: '#fef3c7', text: '#92400e', border: '#fde68a' };
+
+                        return (
+                          <div
+                            key={req.id}
+                            style={{
+                              padding: '14px 16px',
+                              borderRadius: '10px',
+                              border: `1px solid ${statusColor.border}`,
+                              background: '#ffffff',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                              <div>
+                                <span style={{ fontWeight: 700, color: '#111827', fontSize: '0.95rem' }}>
+                                  {req.material?.name || 'Material'}
+                                </span>
+                                {req.material?.materialCode && (
+                                  <span style={{ marginLeft: '6px', fontSize: '0.75rem', color: '#6b7280', background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>
+                                    {req.material?.materialCode}
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                style={{
+                                  padding: '3px 10px',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: statusColor.bg,
+                                  color: statusColor.text,
+                                }}
+                              >
+                                {req.status === 'PENDING' ? '⏳ Awaiting Review' : req.status === 'APPROVED' ? '✓ Approved' : req.status === 'ISSUED' ? '📦 Stock Issued' : '✕ Rejected'}
+                              </span>
+                            </div>
+
+                            <div style={{ fontSize: '0.85rem', color: '#4b5563', marginBottom: '6px' }}>
+                              🏗️ <b>Project:</b> {req.project?.name || 'Assigned Site'} | <b>Qty:</b> {req.requestedQuantity || req.quantity} {req.material?.unit || 'units'}
+                              {req.issuedQuantity > 0 && (
+                                <span style={{ marginLeft: '8px', color: '#059669', fontWeight: 600 }}>
+                                  (Issued: {req.issuedQuantity} {req.material?.unit || 'units'})
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+                              <span>📅 Requested: {formatDate(req.requestDate || req.createdAt)}</span>
+                              {req.requiredDate && <span>🎯 Needed by: {formatDate(req.requiredDate)}</span>}
+                            </div>
+
+                            {req.remarks && (
+                              <div style={{ marginTop: '6px', fontSize: '0.8rem', color: '#4b5563', background: '#f9fafb', padding: '6px 10px', borderRadius: '6px' }}>
+                                💬 <i>{req.remarks}</i>
+                              </div>
+                            )}
+
+                            {req.approvedBy && (
+                              <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#6b7280' }}>
+                                Reviewer: <b>{req.approvedBy}</b> {req.approvalDate ? `on ${formatDate(req.approvalDate)}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </main>

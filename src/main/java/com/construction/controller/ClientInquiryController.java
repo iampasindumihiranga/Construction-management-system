@@ -55,6 +55,15 @@ public class ClientInquiryController {
         return ResponseEntity.ok(inquiryService.respond(id, responseText, respondedBy));
     }
 
+    /** Body: { "senderRole": "CLIENT" | "CLIENT_MANAGER", "senderName": "...", "message": "..." } */
+    @PostMapping("/{id}/messages")
+    public ResponseEntity<ClientInquiry> addMessage(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(inquiryService.addMessage(
+                id, body.get("senderRole"), body.get("senderName"), body.get("message")));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         inquiryService.delete(id);

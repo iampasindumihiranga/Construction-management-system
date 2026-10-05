@@ -2,6 +2,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\auth\AuthRequest.j
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\auth\AuthResponse.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\auth\ClientRegistrationRequest.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\auth\ManagementRole.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\config\DesignMigrationRunner.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\config\DownPaymentSchemaMigration.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\config\MaterialSchemaMigration.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\config\UserAccountRoleSchemaMigration.java
@@ -14,6 +15,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ClientF
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ClientInquiryController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ClientNotificationController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\ContractController.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\DesignController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\DownPaymentController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\EmployeeController.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\controller\InventoryController.java
@@ -34,9 +36,11 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ClientFeedba
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ClientInquiry.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ClientNotification.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Contract.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Design.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\DownPayment.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Employee.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\EmployeeAttendance.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\InquiryMessage.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Material.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\MaterialRequest.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\MaterialTransaction.java
@@ -48,6 +52,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectReque
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\ProjectTask.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\PurchaseOrder.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\StockAlert.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\Supplier.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\model\UserAccount.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\BankDetailsRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientFeedbackRepository.java
@@ -55,9 +60,11 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientI
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientNotificationRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ClientRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ContractRepository.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\DesignRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\DownPaymentRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\EmployeeAttendanceRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\EmployeeRepository.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\InquiryMessageRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\MaterialRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\MaterialRequestRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\MaterialTransactionRepository.java
@@ -69,6 +76,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\Project
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\ProjectTaskRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\PurchaseOrderRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\StockAlertRepository.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\SupplierRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\repository\UserAccountRepository.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\AuthService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\BankDetailsService.java
@@ -77,6 +85,7 @@ C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ClientInqu
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ClientNotificationService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ClientService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\ContractService.java
+C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\DesignService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\DownPaymentService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\EmployeeService.java
 C:\Users\iampa\Desktop\Odiliya\src\main\java\com\construction\service\InventoryService.java

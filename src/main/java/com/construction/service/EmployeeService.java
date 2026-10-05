@@ -439,10 +439,8 @@ public class EmployeeService {
         LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Kolkata"));
         LocalDate date = input.getDate() != null ? input.getDate() : today;
 
-        if (input.getRecordedBy() != null && input.getRecordedBy().startsWith("Self")) {
-            if (!date.equals(today)) {
-                throw new BadRequestException("Attendance can only be marked for today. Previous and upcoming days attendance cannot be marked.");
-            }
+        if (!date.equals(today)) {
+            throw new BadRequestException("Attendance can only be marked for today. Previous and upcoming days attendance cannot be marked.");
         }
 
         String rawStatus = input.getStatus() != null ? input.getStatus().trim().toUpperCase() : "PRESENT";

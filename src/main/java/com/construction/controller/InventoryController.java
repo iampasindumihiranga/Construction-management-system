@@ -5,10 +5,12 @@ import com.construction.model.MaterialRequest;
 import com.construction.model.MaterialTransaction;
 import com.construction.model.PurchaseOrder;
 import com.construction.model.StockAlert;
+import com.construction.model.Supplier;
 import com.construction.service.InventoryService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -87,8 +89,8 @@ public class InventoryController {
 
     // Step 5: Employee / Project Requests Materials
     @PostMapping("/requests")
-    public ResponseEntity<MaterialRequest> createRequest(@Valid @RequestBody MaterialRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(inventoryService.createRequest(request));
+    public ResponseEntity<MaterialRequest> createRequest(@RequestBody Map<String, Object> payload) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(inventoryService.createRequest(payload));
     }
 
     @GetMapping("/requests")
@@ -193,5 +195,41 @@ public class InventoryController {
     ) {
         String status = payload != null ? payload.get("status") : "ACKNOWLEDGED";
         return ResponseEntity.ok(inventoryService.updateStockAlertStatus(id, status));
+    }
+
+    // Supplier Management & Procurement
+    @PostMapping("/suppliers")
+    public ResponseEntity<Supplier> createSupplier(@Valid @RequestBody Supplier supplier) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(inventoryService.createSupplier(supplier));
+    }
+
+    @GetMapping("/suppliers/next-code")
+    public ResponseEntity<String> nextSupplierCode() {
+        return ResponseEntity.ok(inventoryService.previewNextSupplierCode());
+    }
+
+    @GetMapping("/suppliers")
+    public ResponseEntity<List<Supplier>> getSuppliers(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String status
+    ) {
+        return ResponseEntity.ok(inventoryService.getAllSuppliers(search, category, status));
+    }
+
+    @GetMapping("/suppliers/{id}")
+    public ResponseEntity<Supplier> getSupplierById(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryService.getSupplierById(id));
+    }
+
+    @PutMapping("/suppliers/{id}")
+    public ResponseEntity<Supplier> updateSupplier(@PathVariable Long id, @Valid @RequestBody Supplier supplier) {
+        return ResponseEntity.ok(inventoryService.updateSupplier(id, supplier));
+    }
+
+    @DeleteMapping("/suppliers/{id}")
+    public ResponseEntity<Void> deleteSupplier(@PathVariable Long id) {
+        inventoryService.deleteSupplier(id);
+        return ResponseEntity.noContent().build();
     }
 }

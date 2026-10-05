@@ -39,7 +39,10 @@ public class MaterialRequest {
 
     @NotNull(message = "Requested quantity is required")
     @Positive(message = "Requested quantity must be positive")
-    @Column(nullable = false)
+    @Column(name = "quantity", nullable = false)
+    private Double quantity;
+
+    @Column(name = "requested_quantity")
     private Double requestedQuantity;
 
     private String requestedBy;
@@ -53,6 +56,9 @@ public class MaterialRequest {
 
     @Column(length = 500)
     private String remarks;
+
+    @Column(name = "reason")
+    private String reason;
 
     private String approvedBy;
 
@@ -68,10 +74,50 @@ public class MaterialRequest {
         this.project = project;
         this.material = material;
         this.requestedQuantity = requestedQuantity;
+        this.quantity = requestedQuantity;
         this.requestedBy = requestedBy;
         this.remarks = remarks;
+        this.reason = remarks != null ? remarks : "Site Material Requisition";
         this.requestDate = LocalDate.now();
         this.status = "PENDING";
+        this.issuedQuantity = 0.0;
+    }
+
+    @jakarta.persistence.PrePersist
+    @jakarta.persistence.PreUpdate
+    public void syncQuantities() {
+        if (this.requestedQuantity == null && this.quantity != null) {
+            this.requestedQuantity = this.quantity;
+        }
+        if (this.quantity == null && this.requestedQuantity != null) {
+            this.quantity = this.requestedQuantity;
+        }
+        if (this.reason == null || this.reason.isBlank()) {
+            this.reason = (this.remarks != null && !this.remarks.isBlank()) ? this.remarks : "Site Material Requisition";
+        }
+        if (this.remarks == null || this.remarks.isBlank()) {
+            this.remarks = this.reason;
+        }
+        if (this.requestDate == null) {
+            this.requestDate = LocalDate.now();
+        }
+        if (this.status == null) {
+            this.status = "PENDING";
+        }
+        if (this.issuedQuantity == null) {
+            this.issuedQuantity = 0.0;
+        }
+    }
+
+    public String getReason() {
+        return reason != null ? reason : remarks;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
+        if (this.remarks == null || this.remarks.isBlank()) {
+            this.remarks = reason;
+        }
     }
 
     public Long getId() {
@@ -107,11 +153,21 @@ public class MaterialRequest {
     }
 
     public Double getRequestedQuantity() {
-        return requestedQuantity;
+        return requestedQuantity != null ? requestedQuantity : quantity;
     }
 
     public void setRequestedQuantity(Double requestedQuantity) {
         this.requestedQuantity = requestedQuantity;
+        this.quantity = requestedQuantity;
+    }
+
+    public Double getQuantity() {
+        return quantity != null ? quantity : requestedQuantity;
+    }
+
+    public void setQuantity(Double quantity) {
+        this.quantity = quantity;
+        this.requestedQuantity = quantity;
     }
 
     public String getRequestedBy() {

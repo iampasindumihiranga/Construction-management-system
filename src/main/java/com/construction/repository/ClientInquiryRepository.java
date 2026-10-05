@@ -12,4 +12,5 @@ public interface ClientInquiryRepository extends JpaRepository<ClientInquiry, Lo
     List<ClientInquiry> findAllByOrderByCreatedAtDesc();
     List<ClientInquiry> findByStatusOrderByCreatedAtDesc(String status);
     void deleteByProjectId(Long projectId);
+    List<ClientInquiry> findByDesignId(Long designId);
 }

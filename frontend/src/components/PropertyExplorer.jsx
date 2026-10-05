@@ -95,12 +95,12 @@ export default function PropertyExplorer({
                   />
                   <span className="media-tag-badge">{item.category}</span>
                   <span className="media-status-pill">
-                    {item.status === 'COMPLETED' ? '✓ Ready for Handover' : `${item.progressPercentage || 0}% Built`}
+                    {item.status ? (item.status === 'COMPLETED' ? '✓ Ready for Handover' : `${item.progressPercentage || 0}% Built`) : 'Available Design'}
                   </span>
                 </div>
 
                 <div className="card-content-body">
-                  <span className="card-location">📍 {item.location || 'Colombo, Sri Lanka'}</span>
+                  {item.location && <span className="card-location">📍 {item.location}</span>}
                   <h3 className="card-title">{item.name}</h3>
                   <p className="card-description">{item.description}</p>
 
@@ -111,16 +111,18 @@ export default function PropertyExplorer({
                     </div>
                   )}
 
-                  {item.constructionStatus && (
+                  {(item.remarks || item.constructionStatus) && (
                     <div className="card-construction-box">
-                      <small>Construction Status:</small>
-                      <p>{item.constructionStatus}</p>
-                      <div className="construction-progress-track">
-                        <div
-                          className="construction-progress-fill"
-                          style={{ width: `${item.progressPercentage || 0}%` }}
-                        />
-                      </div>
+                      <small>Design Notes / Remarks:</small>
+                      <p>{item.remarks || item.constructionStatus}</p>
+                      {item.progressPercentage !== undefined && item.progressPercentage > 0 && (
+                        <div className="construction-progress-track">
+                          <div
+                            className="construction-progress-fill"
+                            style={{ width: `${item.progressPercentage || 0}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
 

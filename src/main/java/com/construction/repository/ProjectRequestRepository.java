@@ -12,4 +12,5 @@ public interface ProjectRequestRepository extends JpaRepository<ProjectRequest, 
     List<ProjectRequest> findAllByOrderByCreatedAtDesc();
     List<ProjectRequest> findByStatusInOrderByCreatedAtDesc(List<String> statuses);
     List<ProjectRequest> findByStatusOrderByCreatedAtDesc(String status);
+    List<ProjectRequest> findBySelectedDesignId(Long designId);
 }
