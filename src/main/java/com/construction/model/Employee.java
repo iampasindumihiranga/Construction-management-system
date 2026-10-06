@@ -78,6 +78,7 @@ public class Employee {
     @JsonIgnoreProperties({"milestones", "client"})
     private Project project;
 
+    //Connects an employee to a main/single project.
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "employee_projects",

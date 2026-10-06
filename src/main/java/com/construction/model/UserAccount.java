@@ -14,6 +14,7 @@ import jakarta.persistence.Table;
 @Entity
 @Table(name = "user_accounts")
 public class UserAccount {
+    //Attendance ID
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -29,6 +30,7 @@ public class UserAccount {
     @Column(nullable = false)
     private ManagementRole role;
 
+    //Name shown in the system after login.
     @Column(nullable = false)
     private String displayName;
 

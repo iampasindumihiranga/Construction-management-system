@@ -20,31 +20,38 @@ import java.time.LocalDate;
 @Table(name = "employee_attendance")
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class EmployeeAttendance {
-
+    //Unique ID for each attendance record.
+    //The database generates it automatically.
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @NotNull(message = "Employee is required")
+    //Connects the attendance record to an employee
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "employee_id", nullable = false)
     @JsonIgnoreProperties({"assignedProjects", "passwordHash"})
     private Employee employee;
 
+    //employeeID
     @Transient
     @JsonProperty("employeeId")
     private Long employeeId;
 
+    //Attendance Date
     @NotNull(message = "Attendance date is required")
     @Column(nullable = false)
     private LocalDate date;
 
+    //Attendance Status
     @NotNull(message = "Attendance status is required")
     @Column(nullable = false)
     private String status = "PRESENT"; // PRESENT, ABSENT, LATE, ON_LEAVE, HALF_DAY
 
+    //Check-In Time
     private String checkInTime;
 
+    //checkout time
     private String checkOutTime;
 
     @Column(length = 500)

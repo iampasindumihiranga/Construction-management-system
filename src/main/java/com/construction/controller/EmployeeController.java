@@ -37,7 +37,7 @@ public class EmployeeController {
     public ResponseEntity<Employee> register(@Valid @RequestBody Employee employee) {
         return ResponseEntity.status(HttpStatus.CREATED).body(employeeService.create(employee));
     }
-
+    //generate a new employee id
     @GetMapping("/next-id")
     public ResponseEntity<String> nextEmployeeId() {
         return ResponseEntity.ok(employeeService.previewNextEmployeeId());
@@ -51,17 +51,17 @@ public class EmployeeController {
     ) {
         return ResponseEntity.ok(employeeService.findAll(search, projectId));
     }
-
+    //dashboard summary
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getDashboardSummary() {
         return ResponseEntity.ok(employeeService.getDashboardSummary());
     }
-
+    //view employees
     @GetMapping("/{id:\\d+}")
     public ResponseEntity<Employee> findById(@PathVariable Long id) {
         return ResponseEntity.ok(employeeService.findById(id));
     }
-
+    //update employee profile
     @PutMapping("/{id:\\d+}")
     public ResponseEntity<Employee> updateProfile(@PathVariable Long id, @Valid @RequestBody Employee employee) {
         return ResponseEntity.ok(employeeService.updateProfile(id, employee));
@@ -87,7 +87,7 @@ public class EmployeeController {
         List<Long> projectIds = payload.get("projectIds");
         return ResponseEntity.ok(employeeService.assignProjects(id, projectIds));
     }
-
+    //Assign Multiple Employees to a Project
     @PostMapping("/project/{projectId}/assign")
     public ResponseEntity<Void> assignEmployeesToProject(
             @PathVariable Long projectId,
@@ -97,7 +97,7 @@ public class EmployeeController {
         employeeService.assignEmployeesToProject(projectId, employeeIds);
         return ResponseEntity.ok().build();
     }
-
+    //Delete Employee
     @DeleteMapping("/{id:\\d+}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         employeeService.delete(id);
@@ -109,7 +109,7 @@ public class EmployeeController {
     public ResponseEntity<EmployeeAttendance> recordAttendance(@Valid @RequestBody EmployeeAttendance attendance) {
         return ResponseEntity.status(HttpStatus.CREATED).body(employeeService.recordAttendance(attendance));
     }
-
+    //Record Attendance
     @GetMapping("/attendance")
     public ResponseEntity<List<EmployeeAttendance>> getAttendance(
             @RequestParam(required = false) Long employeeId,
@@ -118,7 +118,7 @@ public class EmployeeController {
     ) {
         return ResponseEntity.ok(employeeService.getAttendanceRecords(employeeId, date, status));
     }
-
+    //View Attendance
     @GetMapping("/{id:\\d+}/attendance")
     public ResponseEntity<List<EmployeeAttendance>> getEmployeeAttendance(@PathVariable Long id) {
         return ResponseEntity.ok(employeeService.getAttendanceForEmployee(id));
@@ -130,13 +130,13 @@ public class EmployeeController {
     ) {
         return ResponseEntity.ok(employeeService.getAttendanceSummary(date));
     }
-
+    //Delete Attendance
     @DeleteMapping("/attendance/{id}")
     public ResponseEntity<Void> deleteAttendance(@PathVariable Long id) {
         employeeService.deleteAttendance(id);
         return ResponseEntity.noContent().build();
     }
-
+    //Delete Attendance by Employee and Date
     @DeleteMapping("/attendance")
     public ResponseEntity<Void> deleteAttendanceByQuery(
             @RequestParam(required = false) Long employeeId,
@@ -153,7 +153,7 @@ public class EmployeeController {
     public ResponseEntity<List<Project>> getAssignedProjects(@PathVariable Long id) {
         return ResponseEntity.ok(employeeService.getAssignedProjects(id));
     }
-
+    //View My Projects
     @GetMapping("/my-projects")
     public ResponseEntity<List<Project>> getMyProjects(@RequestParam(required = false) String username) {
         if (username != null && !username.isBlank()) {
@@ -161,7 +161,7 @@ public class EmployeeController {
         }
         return ResponseEntity.ok(List.of());
     }
-
+    //View My Profile
     @GetMapping("/me")
     public ResponseEntity<Employee> getMyProfile(@RequestParam String username) {
         return ResponseEntity.ok(employeeService.getEmployeeByUsername(username));

@@ -75,19 +75,8 @@ public class ContractService {
         if (contract.getSignedDate() == null) {
             throw new BadRequestException("Contract signed date is required");
         }
-        if (contract.getEndDate() == null) {
-            throw new BadRequestException("Contract end date is required");
-        }
-        if (contract.getEndDate().isBefore(contract.getSignedDate())) {
+        if (contract.getEndDate() != null && contract.getEndDate().isBefore(contract.getSignedDate())) {
             throw new BadRequestException("Contract end date cannot be earlier than signed date");
-        }
-        LocalDate maxEndDate = contract.getSignedDate().plusMonths(2);
-        if (contract.getEndDate().isAfter(maxEndDate)) {
-            throw new BadRequestException("Contract end date cannot exceed 2 months from signed date (max allowed: " + maxEndDate + ")");
-        }
-        // If end date has already passed and status is still ACTIVE, update to EXPIRED
-        if (contract.getEndDate().isBefore(LocalDate.now()) && "ACTIVE".equalsIgnoreCase(contract.getStatus())) {
-            contract.setStatus("EXPIRED");
         }
     }
 

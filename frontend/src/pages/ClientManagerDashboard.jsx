@@ -930,8 +930,7 @@ export default function ClientManagerDashboard() {
             <span className="brand-green-subtitle">CLIENT RELATIONSHIP MANAGEMENT</span>
             <h1>Client Manager Workspace</h1>
             <p>
-              Centrally manage client records, contract start/end dates, expiry alerts, property design catalog,
-              inquiries, and document exchanges.
+              Centrally manage client records, contracts, property design catalog, inquiries, and document exchanges.
             </p>
           </div>
         </section>
@@ -960,14 +959,6 @@ export default function ClientManagerDashboard() {
             onClick={() => setActiveTab('contracts')}
           >
             Contracts ({contracts.length})
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'expiring' ? 'active' : ''}
-            onClick={() => setActiveTab('expiring')}
-          >
-            Expiring Alerts ({expiringContracts.length})
           </button>
 
           <button
@@ -1045,10 +1036,8 @@ export default function ClientManagerDashboard() {
               </div>
 
               <div className="pm-metric">
-                <span>Expiring Contracts (60 Days)</span>
-                <strong style={{ color: expiringContracts.length > 0 ? '#ea580c' : undefined }}>
-                  {summary?.expiringContractsCount ?? expiringContracts.length}
-                </strong>
+                <span>Property Designs</span>
+                <strong>{projects.length}</strong>
               </div>
 
               <div className="pm-metric">
@@ -1058,27 +1047,6 @@ export default function ClientManagerDashboard() {
                 </strong>
               </div>
             </section>
-
-            {expiringContracts.length > 0 && (
-              <div className="pm-alert error" style={{ margin: '1.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-                <div>
-                  <strong style={{ display: 'block', fontSize: '1rem' }}>
-                    Action Required: {expiringContracts.length} Contract(s) Expiring Within 60 Days!
-                  </strong>
-                  <p style={{ fontSize: '0.88rem', margin: '0.25rem 0 0' }}>
-                    {expiringContracts.map((c) => `${c.title} (Expires: ${formatDate(c.endDate)})`).join(' • ')}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn-solid-green"
-                  style={{ padding: '0.4rem 1rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
-                  onClick={() => setActiveTab('expiring')}
-                >
-                  Review Alerts
-                </button>
-              </div>
-            )}
 
             <div className="light-panel-card">
               <div className="panel-card-head">
@@ -1302,77 +1270,7 @@ export default function ClientManagerDashboard() {
           </div>
         )}
 
-        {/* TAB 4: EXPIRY ALERTS */}
-        {activeTab === 'expiring' && (
-          <div className="light-panel-card">
-            <div className="panel-card-head">
-              <div>
-                <span className="brand-green-subtitle">EXPIRY ALERTS</span>
-                <h3 className="panel-title">Agreements Approaching Expiry Within 60 Days</h3>
-              </div>
-            </div>
 
-            {expiringContracts.length > 0 ? (
-              <div className="table-responsive-box">
-                <table className="light-table">
-                  <thead>
-                    <tr>
-                      <th>Contract #</th>
-                      <th>Title</th>
-                      <th>Client Name &amp; Contact</th>
-                      <th>Amount</th>
-                      <th>Signed Date</th>
-                      <th>Expiry Date</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {expiringContracts.map((c) => (
-                      <tr key={c.id} style={{ background: 'rgba(234, 88, 12, 0.05)' }}>
-                        <td><strong>{c.contractNumber}</strong></td>
-                        <td>{c.title}</td>
-                        <td>
-                          <strong>{c.client?.name}</strong>
-                          <small style={{ display: 'block', color: 'var(--text-muted)' }}>{c.client?.phone || c.client?.email}</small>
-                        </td>
-                        <td><strong style={{ color: 'var(--brand-green)' }}>{formatMoney(c.amount)}</strong></td>
-                        <td>{formatDate(c.signedDate)}</td>
-                        <td><strong style={{ color: '#ea580c' }}>{formatDate(c.endDate)}</strong></td>
-                        <td><span className="pill-badge expiring_soon">Approaching Expiry</span></td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn-solid-green"
-                            style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                            onClick={() => {
-                              setEditingContract(c);
-                              setContractForm({
-                                contractNumber: c.contractNumber || '',
-                                title: c.title || '',
-                                amount: String(c.amount || ''),
-                                signedDate: formatDate(c.signedDate),
-                                endDate: formatDate(c.endDate),
-                                status: 'ACTIVE',
-                                terms: c.terms || '',
-                                clientId: c.client?.id ? String(c.client.id) : '',
-                              });
-                              setContractModalOpen(true);
-                            }}
-                          >
-                            Extend / Renew
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-muted">No contracts currently expiring within 60 days.</p>
-            )}
-          </div>
-        )}
 
         {/* TAB 5: CLIENT DESIGN CATALOG & PROJECTS */}
         {activeTab === 'projects' && (

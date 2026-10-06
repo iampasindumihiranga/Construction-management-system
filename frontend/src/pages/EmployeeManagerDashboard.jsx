@@ -378,15 +378,15 @@ export default function EmployeeManagerDashboard() {
     current.setDate(current.getDate() + days);
     setSelectedDate(localDateString(current));
   };
-
+  //attendance marking dropdown
   const getStatusConfig = (status) => {
     switch (status) {
       case 'PRESENT':
-        return { label: 'Present', icon: '✓', bg: '#dcfce7', text: '#166534', border: '#86efac' };
+        return { label: 'Present', icon: '✓', bg: '#dcfce7', text: '#0748ec', border: '#86efac' };
       case 'ABSENT':
         return { label: 'Absent', icon: '✕', bg: '#fee2e2', text: '#991b1b', border: '#fca5a5' };
       case 'LATE':
-        return { label: 'Late', icon: '⏱', bg: '#fef3c7', text: '#92400e', border: '#fde047' };
+        return { label: 'Late', icon: '⏱', bg: '#fef3c7', text: '#92400e', border: '#e3b80e' };
       case 'HALF_DAY':
         return { label: 'Half Day', icon: '🌗', bg: '#e0f2fe', text: '#0369a1', border: '#7dd3fc' };
       case 'ON_LEAVE':

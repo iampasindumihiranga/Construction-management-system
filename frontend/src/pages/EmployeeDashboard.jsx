@@ -18,6 +18,7 @@ import {
   getProjects,
 } from '../services/api';
 
+//roles
 const ROLES_LIST = [
   'Site Engineer',
   'Civil Engineer',
@@ -32,7 +33,7 @@ const ROLES_LIST = [
   'Site Supervisor',
   'General Staff',
 ];
-
+//departments show in employee
 const DEPARTMENTS = [
   'Engineering',
   'Electrical & Utilities',
@@ -42,7 +43,7 @@ const DEPARTMENTS = [
   'Site Safety & Quality',
   'Operations & Logistics',
 ];
-
+//getting today's date
 const getTodayDateString = () => {
   const d = new Date();
   const year = d.getFullYear();
@@ -50,7 +51,7 @@ const getTodayDateString = () => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-
+//EmployeeDashboard Component
 export default function EmployeeDashboard() {
   const { user, updateUser } = useAuth();
   const [profile, setProfile] = useState(null);
@@ -156,6 +157,7 @@ export default function EmployeeDashboard() {
     }
   };
 
+  //Creating a Material Request
   const handleCreateMaterialRequest = async (e) => {
     e.preventDefault();
     if (!materialRequestForm.projectId || !materialRequestForm.materialId || !materialRequestForm.requestedQuantity) {
@@ -201,6 +203,7 @@ export default function EmployeeDashboard() {
     loadEmployeeData();
   }, [user]);
 
+  //Marking Attendance
   const handleMarkAttendance = async (e) => {
     e.preventDefault();
     if (!profile?.id) return;
@@ -266,6 +269,7 @@ export default function EmployeeDashboard() {
     setProfileError('');
   };
 
+  //Saving Profile
   const handleSaveProfile = async (e) => {
     if (e) e.preventDefault();
     if (!profile?.id) return;

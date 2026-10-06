@@ -10,28 +10,35 @@ import java.util.List;
 import java.util.Optional;
 
 public interface EmployeeAttendanceRepository extends JpaRepository<EmployeeAttendance, Long> {
-
+    //Find attendance for one employee
     @Query("SELECT a FROM EmployeeAttendance a WHERE a.employee.id = :employeeId ORDER BY a.date DESC")
     List<EmployeeAttendance> findByEmployeeIdOrderByDateDesc(@Param("employeeId") Long employeeId);
 
+    //Find attendance for a specific date
     @Query("SELECT a FROM EmployeeAttendance a WHERE a.date = :date ORDER BY a.employee.name ASC")
     List<EmployeeAttendance> findByDateOrderByEmployeeNameAsc(@Param("date") LocalDate date);
 
+    //Find attendance between two dates
     List<EmployeeAttendance> findByDateBetweenOrderByDateDesc(LocalDate startDate, LocalDate endDate);
 
+    //Employee attendance within a date range
     @Query("SELECT a FROM EmployeeAttendance a WHERE a.employee.id = :employeeId AND a.date BETWEEN :startDate AND :endDate ORDER BY a.date DESC")
     List<EmployeeAttendance> findByEmployeeIdAndDateBetweenOrderByDateDesc(
             @Param("employeeId") Long employeeId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
 
+    //Find attendance for one employee on one date
     @Query("SELECT a FROM EmployeeAttendance a WHERE a.employee.id = :employeeId AND a.date = :date")
     Optional<EmployeeAttendance> findByEmployeeIdAndDate(@Param("employeeId") Long employeeId, @Param("date") LocalDate date);
 
+    //Count attendance by status
     long countByDateAndStatusIgnoreCase(LocalDate date, String status);
 
+    //Count attendance records for a date
     long countByDate(LocalDate date);
 
+    //Filter attendance
     @Query("SELECT a FROM EmployeeAttendance a WHERE " +
             "(:employeeId IS NULL OR a.employee.id = :employeeId) AND " +
             "(:date IS NULL OR a.date = :date) AND " +
