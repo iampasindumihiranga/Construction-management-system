@@ -146,7 +146,7 @@ export default function SwipeableDesignGallery({ images = [], title = 'Property'
             zIndex: 3,
           }}
         >
-          <span>📷</span>
+          
           <span>{currentIndex + 1} / {validImages.length}</span>
         </div>
 
@@ -167,7 +167,7 @@ export default function SwipeableDesignGallery({ images = [], title = 'Property'
               letterSpacing: '0.02em',
             }}
           >
-            👉 Swipe right or click › to view images
+            Swipe right or click to view images
           </div>
         )}
 

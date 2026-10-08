@@ -30,6 +30,7 @@ import {
   updateSupplier,
   deleteSupplier,
 } from '../services/api';
+import { downloadFile } from '../utils/documentDownload';
 
 const DEFAULT_CATEGORIES = [
   'Building Materials',
@@ -2012,7 +2013,7 @@ export default function InventoryManagerDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {stockAlerts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '48px 24px', color: '#6b7280' }}>
-                  <div style={{ fontSize: '3rem', marginBottom: '12px' }}>✓</div>
+                  
                   <h4 style={{ margin: '0 0 6px', color: '#111827' }}>No Active Site Manager Alerts</h4>
                   <p style={{ margin: 0, fontSize: '0.85rem' }}>Site managers have not reported any urgent low-stock situations.</p>
                 </div>
@@ -2099,7 +2100,7 @@ export default function InventoryManagerDashboard() {
                           onClick={() => handleAlertStatus(alert.id, 'RESOLVED')}
                           style={{ padding: '6px 14px', background: '#047857', color: '#ffffff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
                         >
-                          ✓ Mark Resolved
+                          Mark Resolved
                         </button>
                       )}
                       <button
@@ -2117,9 +2118,57 @@ export default function InventoryManagerDashboard() {
           </div>
         )}
 
-        {/* TAB 8: REPORTS & INVENTORY ANALYTICS */}
+        {/* TAB 8: DOCUMENTS & INVENTORY ANALYTICS */}
         {tab === 'reports' && (
           <div>
+            {/* Documents & Compliance Downloads Banner */}
+            <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '24px' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                  PROCUREMENT &amp; WAREHOUSE VAULT
+                </span>
+                <h2 style={{ margin: '6px 0 4px', color: '#111827', fontSize: '1.35rem', fontWeight: 800 }}>
+                  Material Documents & Invoices Vault
+                </h2>
+                <p style={{ margin: 0, color: '#6b7280', fontSize: '0.85rem' }}>
+                  Official supplier delivery receipts, material quality certificates, safety data sheets (MSDS), and master procurement agreements.
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '8px' }}>
+                {[
+                  { name: 'Odiliya_Supplier_Delivery_Receipt_Note.pdf', size: '320 KB', desc: 'Official warehouse goods receiving note (GRN)' },
+                  { name: 'Odiliya_Material_Testing_and_Quality_Certificate.pdf', size: '1.2 MB', desc: 'Concrete slump & steel tensile strength test standards' },
+                  { name: 'Odiliya_Construction_Chemicals_MSDS_Manual.pdf', size: '2.4 MB', desc: 'Material Safety Data Sheets for adhesives & paints' },
+                  { name: 'Odiliya_Master_Vendor_Procurement_Contract.pdf', size: '450 KB', desc: 'Standard terms & payment guarantee agreement' },
+                ].map((doc) => (
+                  <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                    <div style={{ flex: 1, marginRight: '8px' }}>
+                      <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.82rem' }}>{doc.name}</div>
+                      <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => downloadFile(null, doc.name)}
+                      style={{
+                        padding: '5px 10px',
+                        background: '#ecfdf5',
+                        color: '#047857',
+                        border: '1px solid #a7f3d0',
+                        borderRadius: '6px',
+                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Header & Controls */}
             <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
@@ -2151,7 +2200,7 @@ export default function InventoryManagerDashboard() {
                       boxShadow: '0 2px 4px rgba(4, 120, 87, 0.2)',
                     }}
                   >
-                    <span>📥</span> Export to CSV Spreadsheet
+                    Export to CSV Spreadsheet
                   </button>
                   <button
                     type="button"
@@ -2170,7 +2219,7 @@ export default function InventoryManagerDashboard() {
                       gap: '8px',
                     }}
                   >
-                    <span>🖨️</span> Print / Save as PDF
+                    Print / Save as PDF
                   </button>
                 </div>
               </div>

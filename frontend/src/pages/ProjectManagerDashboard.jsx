@@ -24,6 +24,7 @@ import {
   updateProject,
   updateTask,
 } from '../services/api';
+import { downloadFile, exportCsv } from '../utils/documentDownload';
 
 const statuses = ['PLANNING', 'IN_PROGRESS', 'ON_HOLD', 'COMPLETED', 'CANCELLED'];
 
@@ -529,7 +530,7 @@ export default function ProjectManagerDashboard() {
   const ProjectSelector = () => (
     <div style={{ background: '#f8fafc', padding: '12px 18px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span style={{ fontSize: '1.1rem' }}>🏗️</span>
+        
         <label htmlFor="pm-project-select" style={{ fontWeight: 700, color: '#1e293b', fontSize: '0.92rem' }}>
           Active Project:
         </label>
@@ -597,6 +598,9 @@ export default function ProjectManagerDashboard() {
           <button onClick={() => setTab('team')} className={tab === 'team' ? 'active' : ''}>
             Project Team
           </button>
+          <button onClick={() => setTab('documents')} className={tab === 'documents' ? 'active' : ''}>
+            Documents & Blueprints
+          </button>
         </nav>
 
         {notice && <div className="pm-alert success">{notice}</div>}
@@ -643,7 +647,7 @@ export default function ProjectManagerDashboard() {
 
             {forwardedRequests.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                <span style={{ fontSize: '3rem', display: 'block', marginBottom: '0.5rem' }}>📋</span>
+                
                 <h3>No Client Requests Forwarded</h3>
                 <p>When the Client Manager forwards custom design requests, they will appear here for engineering assessment.</p>
               </div>
@@ -682,38 +686,38 @@ export default function ProjectManagerDashboard() {
                           </span>
                           <h3 style={{ margin: '0.2rem 0', color: '#0f172a', fontSize: '1.25rem' }}>{req.title}</h3>
                           <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
-                            📍 Location: <strong>{req.location || 'N/A'}</strong> &nbsp;|&nbsp; Target Start: <strong>{req.targetStartDate ? formatDate(req.targetStartDate) : 'Flexible'}</strong>
+                            Location: <strong>{req.location || 'N/A'}</strong> &nbsp;|&nbsp; Target Start: <strong>{req.targetStartDate ? formatDate(req.targetStartDate) : 'Flexible'}</strong>
                           </p>
                         </div>
                         <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                           {isAwaitingPm && (
                             <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#fef3c7', color: '#b45309', fontWeight: 700, fontSize: '0.82rem' }}>
-                              ⚠️ Action Needed (Reply to CM)
+                              Action Needed (Reply to CM)
                             </span>
                           )}
                           {isPmReviewed && (
                             <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#eff6ff', color: '#1e40af', fontWeight: 600, fontSize: '0.82rem' }}>
-                              ✓ Engineering Review Submitted
+                              Engineering Review Submitted
                             </span>
                           )}
                           {isClientNotified && (
                             <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#f0fdf4', color: '#16a34a', fontWeight: 600, fontSize: '0.82rem' }}>
-                              ✓ Client Notified by CM
+                              Client Notified by CM
                             </span>
                           )}
                           {isApproved && (
                             <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#dcfce7', color: '#166534', fontWeight: 700, fontSize: '0.82rem' }}>
-                              ✓ Approved by Client Manager — Ready to Start
+                              Approved by Client Manager — Ready to Start
                             </span>
                           )}
                           {isStarted && (
                             <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700, fontSize: '0.82rem' }}>
-                              🚀 Project Started (ID #{req.startedProjectId})
+                              Project Started (ID #{req.startedProjectId})
                             </span>
                           )}
                           {isRejected && (
                             <span style={{ padding: '0.35rem 0.75rem', borderRadius: '20px', background: '#fee2e2', color: '#b91c1c', fontWeight: 700, fontSize: '0.82rem' }}>
-                              ✗ Rejected
+                              Rejected
                             </span>
                           )}
                         </div>
@@ -759,7 +763,7 @@ export default function ProjectManagerDashboard() {
                       {req.cmNotes && (
                         <div style={{ marginTop: '0.85rem', padding: '0.75rem 1rem', background: '#eff6ff', borderLeft: '4px solid #3b82f6', borderRadius: '0 8px 8px 0', fontSize: '0.88rem' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                            <strong style={{ color: '#1d4ed8' }}>💬 Client Manager Instructions ({req.forwardedByCm || 'CM'}):</strong>
+                            <strong style={{ color: '#1d4ed8' }}>Client Manager Instructions ({req.forwardedByCm || 'CM'}):</strong>
                             <small style={{ color: '#64748b' }}>{formatDate(req.forwardedToPmAt)}</small>
                           </div>
                           <p style={{ margin: 0, color: '#1e3a8a' }}>{req.cmNotes}</p>
@@ -770,7 +774,7 @@ export default function ProjectManagerDashboard() {
                       {req.pmReply && (
                         <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#f5f3ff', borderLeft: '4px solid #7c3aed', borderRadius: '0 8px 8px 0', fontSize: '0.88rem' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
-                            <strong style={{ color: '#6d28d9' }}>✓ Your Engineering Assessment &amp; Feasibility ({formatDate(req.pmRespondedAt)}):</strong>
+                            <strong style={{ color: '#6d28d9' }}>Your Engineering Assessment & Feasibility ({formatDate(req.pmRespondedAt)}):</strong>
                             {req.pmEstimatedBudget && (
                               <span style={{ color: '#6d28d9', fontWeight: 700 }}>
                                 Est. Budget: {formatMoney(req.pmEstimatedBudget)} {req.pmEstimatedDuration ? `| Timeline: ${req.pmEstimatedDuration}` : ''}
@@ -784,7 +788,7 @@ export default function ProjectManagerDashboard() {
                       {/* Approved notice */}
                       {isApproved && (
                         <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#f0fdf4', borderLeft: '4px solid #16a34a', borderRadius: '0 8px 8px 0', fontSize: '0.9rem' }}>
-                          <strong style={{ color: '#15803d' }}>✓ Approved by Client Manager ({req.approvedBy || 'CM'} on {formatDate(req.approvedAt)})</strong>
+                          <strong style={{ color: '#15803d' }}>Approved by Client Manager ({req.approvedBy || 'CM'} on {formatDate(req.approvedAt)})</strong>
                           <p style={{ margin: '0.2rem 0 0', color: '#166534' }}>
                             This custom request has been approved! You can now start the construction project and assign this client.
                           </p>
@@ -794,7 +798,7 @@ export default function ProjectManagerDashboard() {
                       {/* Started notice */}
                       {isStarted && (
                         <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#ecfdf5', borderLeft: '4px solid #10b981', borderRadius: '0 8px 8px 0', fontSize: '0.9rem' }}>
-                          <strong style={{ color: '#047857' }}>🚀 Construction Project Initialized &amp; Assigned</strong>
+                          <strong style={{ color: '#047857' }}>Construction Project Initialized & Assigned</strong>
                           <p style={{ margin: '0.2rem 0 0', color: '#065f46' }}>
                             Project ID #{req.startedProjectId} is actively managed under Projects. Client {req.client?.name} is assigned.
                           </p>
@@ -818,7 +822,7 @@ export default function ProjectManagerDashboard() {
                             style={{ padding: '0.6rem 1.4rem', fontSize: '0.92rem', background: '#16a34a', borderColor: '#16a34a', fontWeight: 700 }}
                             onClick={() => handleOpenStartProjectModal(req)}
                           >
-                            🚀 Start Project (Assign Client)
+                            Start Project (Assign Client)
                           </button>
                         )}
 
@@ -861,7 +865,7 @@ export default function ProjectManagerDashboard() {
             <FormCard title={editingProject ? 'Edit project' : 'Create project'}>
               <form onSubmit={saveProject} className="pm-form">
                 <div style={{ padding: '0.65rem 0.85rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', fontSize: '0.84rem', color: '#166534', marginBottom: '0.75rem' }}>
-                  🔒 <strong>Internal Construction Project:</strong> Visible exclusively to project staff and the assigned client. Not published on the public showcase.
+                  <strong>Internal Construction Project:</strong> Visible exclusively to project staff and the assigned client. Not published on the public showcase.
                 </div>
                 <input
                   placeholder="Project name"
@@ -913,7 +917,7 @@ export default function ProjectManagerDashboard() {
                       style={{ flex: 1 }}
                     />
                     <label className="pm-secondary" style={{ padding: '0.55rem 0.85rem', cursor: 'pointer', margin: 0, fontSize: '0.82rem', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <span>📁 Upload</span>
+                      Upload
                       <input
                         type="file"
                         accept="image/*"
@@ -941,7 +945,7 @@ export default function ProjectManagerDashboard() {
                       onClick={() => setProjectForm({ ...projectForm, imageUrl: '' })}
                       style={{ position: 'absolute', top: '6px', right: '6px', background: 'rgba(0,0,0,0.65)', color: '#fff', borderRadius: '50%', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px' }}
                     >
-                      ✕
+                      ×
                     </button>
                   </div>
                 )}
@@ -1271,7 +1275,7 @@ export default function ProjectManagerDashboard() {
                                   {proj.name}
                                   {checked && (
                                     <span style={{ fontSize: '0.72rem', background: '#d1fae5', color: '#065f46', padding: '2px 7px', borderRadius: '999px', fontWeight: 700 }}>
-                                      ✓ Assigned
+                                      Assigned
                                     </span>
                                   )}
                                 </div>
@@ -1545,6 +1549,195 @@ export default function ProjectManagerDashboard() {
             </div>
           </div>
         )}
+
+        {/* TAB 9: DOCUMENTS & BLUEPRINTS VAULT */}
+        {tab === 'documents' && (
+          <div>
+            <ProjectSelector />
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                <div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                    ENGINEERING &amp; PROJECT VAULT
+                  </span>
+                  <h2 style={{ margin: '6px 0 2px', color: '#111827', fontSize: '1.4rem', fontWeight: 800 }}>
+                    Project Blueprints & Technical Documents
+                  </h2>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.88rem' }}>
+                    Download official architectural plans, CAD drawings, municipal clearances, task schedules, and BOQ specifications.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportCsv(
+                        projects.map((p) => ({
+                          'Project ID': p.id,
+                          'Project Name': p.name,
+                          'Category': p.category,
+                          'Client': p.client?.name || 'In-House',
+                          'Location': p.location || '—',
+                          'Budget (LKR)': p.budget || 0,
+                          'Start Date': p.startDate || '—',
+                          'End Date': p.endDate || '—',
+                          'Progress %': p.progressPercentage || 0,
+                          'Status': p.status,
+                        })),
+                        `Odiliya_Projects_Master_List_${new Date().toISOString().slice(0, 10)}`
+                      );
+                    }}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    Export All Projects (CSV)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportCsv(
+                        tasks.map((t) => ({
+                          'Task ID': t.id,
+                          'Task Name': t.taskName,
+                          'Project': t.project?.name || activeProject?.name || '—',
+                          'Assigned Employee': t.assignedEmployee?.name || 'Unassigned',
+                          'Deadline': t.deadline || '—',
+                          'Progress %': t.progressPercentage || 0,
+                          'Status': t.status,
+                          'Worker Remarks': t.progressRemarks || '—',
+                        })),
+                        `Odiliya_Tasks_Schedule_${new Date().toISOString().slice(0, 10)}`
+                      );
+                    }}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#1d4ed8',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    Export Tasks Schedule (CSV)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Document Cards Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+              {/* Card 1: Project Blueprints & Technical Drawings */}
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Architectural & Engineering Drawings
+                </h3>
+                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
+                  Download structural designs, MEP blueprints, and foundation drawings for <b>{activeProject?.name || 'Selected Project'}</b>.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Architectural_CAD_Master_Plan.pdf`, size: '4.8 MB', desc: 'Complete floor layout and 3D elevations' },
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Structural_Engineering_Calculations.pdf`, size: '2.1 MB', desc: 'Reinforced concrete & steel beam specifications' },
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_MEP_Electrical_Plumbing_Schematics.pdf`, size: '3.3 MB', desc: 'Mechanical, electrical & piping conduit layout' },
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Soil_Investigation_Foundation_Report.pdf`, size: '1.2 MB', desc: 'Geotechnical soil report & piling foundation' },
+                  ].map((doc) => (
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(null, doc.name)}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Card 2: Legal Approvals, BOQ & Compliance */}
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Municipal Permits & BOQ Specifications
+                </h3>
+                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
+                  Statutory approvals, Urban Development Authority (UDA) permits, and master bills of quantities.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Municipal_Building_Permit_Clearance.pdf`, size: '920 KB', desc: 'Approved municipal council building plan certificate' },
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Bill_of_Quantities_BOQ_Master.pdf`, size: '1.8 MB', desc: 'Itemized material & labor estimation schedule' },
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Environmental_Impact_Clearance.pdf`, size: '640 KB', desc: 'Central Environmental Authority (CEA) clearance certificate' },
+                    { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Fire_Safety_Department_Approval.pdf`, size: '480 KB', desc: 'Civil defense fire safety & hydrant installation pass' },
+                  ].map((doc) => (
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(null, doc.name)}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {/* PM TECHNICAL REPLY MODAL */}
         {pmReplyModalOpen && pmReplyTarget && (
           <div className="light-modal-overlay">
@@ -1554,7 +1747,7 @@ export default function ProjectManagerDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>PROJECT ENGINEERING ASSESSMENT</span>
                   <h3 style={{ margin: '0.2rem 0 0' }}>Technical Reply for: {pmReplyTarget.title}</h3>
                 </div>
-                <button type="button" onClick={() => { setPmReplyModalOpen(false); setPmReplyTarget(null); }}>✕</button>
+                <button type="button" onClick={() => { setPmReplyModalOpen(false); setPmReplyTarget(null); }}>×</button>
               </div>
 
               <form onSubmit={handleSubmitPmReply} style={{ marginTop: '1.25rem' }}>
@@ -1626,7 +1819,7 @@ export default function ProjectManagerDashboard() {
             <div className="light-modal-box" style={{ maxWidth: '750px' }}>
               <div className="modal-head-row">
                 <h3>Drawings &amp; Photos — {pmPreviewPhotosModal.title}</h3>
-                <button type="button" onClick={() => setPmPreviewPhotosModal(null)}>✕</button>
+                <button type="button" onClick={() => setPmPreviewPhotosModal(null)}>×</button>
               </div>
               <div className="modal-body-content" style={{ marginTop: '1rem' }}>
                 <p style={{ color: '#64748b', marginBottom: '1rem' }}>
@@ -1654,9 +1847,9 @@ export default function ProjectManagerDashboard() {
               <div className="modal-head-row">
                 <div>
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>CONSTRUCTION PROJECT INITIALIZATION</span>
-                  <h3 style={{ margin: '0.2rem 0 0', color: '#166534' }}>🚀 Start Project: {startProjectTarget.title}</h3>
+                  <h3 style={{ margin: '0.2rem 0 0', color: '#166534' }}>Start Project: {startProjectTarget.title}</h3>
                 </div>
-                <button type="button" onClick={() => { setStartProjectModalOpen(false); setStartProjectTarget(null); }}>✕</button>
+                <button type="button" onClick={() => { setStartProjectModalOpen(false); setStartProjectTarget(null); }}>×</button>
               </div>
 
               <form onSubmit={handleConfirmStartProject} style={{ marginTop: '1.25rem' }}>
@@ -1665,7 +1858,7 @@ export default function ProjectManagerDashboard() {
                     <strong>Assigned Client:</strong> {startProjectTarget.client?.name} ({startProjectTarget.client?.email || 'N/A'}, {startProjectTarget.client?.phone || 'N/A'})
                   </p>
                   <p style={{ margin: 0, color: '#166534' }}>
-                    🔒 Starting this project will assign client <strong>{startProjectTarget.client?.name}</strong> to the construction pipeline. The client will be able to track live progress and milestones from their portal.
+                    Starting this project will assign client <strong>{startProjectTarget.client?.name}</strong> to the construction pipeline. The client will be able to track live progress and milestones from their portal.
                   </p>
                 </div>
 
@@ -1753,7 +1946,7 @@ export default function ProjectManagerDashboard() {
                     Cancel
                   </button>
                   <button type="submit" className="btn-solid-green" disabled={startingProject} style={{ background: '#16a34a' }}>
-                    {startingProject ? 'Starting Project...' : '🚀 Initialize Project & Assign Client'}
+                    {startingProject ? 'Starting Project...' : 'Initialize Project & Assign Client'}
                   </button>
                 </div>
               </form>
@@ -1814,7 +2007,7 @@ function TaskTable({ tasks, completeTask }) {
                 {task.description && <small>{task.description}</small>}
                 {task.progressRemarks && (
                   <div style={{ fontSize: '0.75rem', color: '#047857', marginTop: '4px', fontStyle: 'italic' }}>
-                    💬 Worker Note: {task.progressRemarks}
+                    Worker Note: {task.progressRemarks}
                   </div>
                 )}
               </td>

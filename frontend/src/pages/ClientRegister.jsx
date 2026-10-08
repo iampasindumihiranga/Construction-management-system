@@ -99,14 +99,14 @@ export default function ClientRegister() {
 
           {message && (
             <div className="light-alert alert-success" style={{ marginBottom: '1.25rem' }}>
-              <span className="alert-icon">✅</span>
+              
               <span>{message}</span>
             </div>
           )}
 
           {error && (
             <div className="light-alert alert-danger" style={{ marginBottom: '1.25rem' }}>
-              <span className="alert-icon">⚠️</span>
+              
               <span>{error}</span>
             </div>
           )}

@@ -183,8 +183,8 @@ export default function PublicFeedbackDashboard() {
     const full = Math.max(0, Math.min(5, Math.round(rating)));
     return (
       <span className="star-rating-display" title={`${rating} out of 5 stars`}>
-        {'★'.repeat(full)}
-        {'☆'.repeat(5 - full)}
+        {`${summary.averageRating ? Number(summary.averageRating).toFixed(1) : '5.0'} / 5`}
+        
       </span>
     );
   };
@@ -218,7 +218,7 @@ export default function PublicFeedbackDashboard() {
           <div className="hero-metric-badges">
             <div className="metric-badge-box highlight">
               <span className="badge-big-number">
-                {summary.averageRating ? Number(summary.averageRating).toFixed(1) : '5.0'} ★
+                {summary.averageRating ? Number(summary.averageRating).toFixed(1) : '5.0'} / 5
               </span>
               <span className="badge-small-label">Average Client Rating</span>
             </div>
@@ -238,7 +238,7 @@ export default function PublicFeedbackDashboard() {
             </div>
             {isClient && clientProfile && (
               <span className="pill-badge active" style={{ fontSize: '0.82rem', padding: '0.35rem 0.8rem' }}>
-                ✓ Verified Client: {clientProfile.name} ({clientProfile.employeeNumber || `ID #${clientProfile.id}`})
+                Verified Client: {clientProfile.name} ({clientProfile.employeeNumber || `ID #${clientProfile.id}`})
               </span>
             )}
           </div>
@@ -325,12 +325,12 @@ export default function PublicFeedbackDashboard() {
             <form onSubmit={handleSubmitFeedback}>
               {formSuccess && (
                 <div className="light-alert alert-success" style={{ marginBottom: '1.25rem' }}>
-                  <span>✓ {formSuccess}</span>
+                  <span>{formSuccess}</span>
                 </div>
               )}
               {formError && (
                 <div className="light-alert alert-danger" style={{ marginBottom: '1.25rem' }}>
-                  <span>⚠️ {formError}</span>
+                  <span>{formError}</span>
                 </div>
               )}
 
@@ -358,7 +358,7 @@ export default function PublicFeedbackDashboard() {
                         onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
                         title={`${star} Star${star > 1 ? 's' : ''}`}
                       >
-                        ★
+                        
                       </button>
                     ))}
                     <span style={{ marginLeft: '0.5rem', fontWeight: 700, color: '#f59e0b', fontSize: '1.1rem' }}>
@@ -477,7 +477,7 @@ export default function PublicFeedbackDashboard() {
                     }}
                   >
                     <span style={{ fontSize: '0.85rem', width: '45px', fontWeight: 600, color: '#334155' }}>
-                      {star} ★
+                      {star} / 5
                     </span>
                     <div style={{ flex: 1, height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
                       <div
@@ -572,7 +572,7 @@ export default function PublicFeedbackDashboard() {
               </div>
             ) : filteredFeedbacks.length === 0 ? (
               <div className="light-panel-card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
-                <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '0.5rem' }}>💬</span>
+                
                 <h3 style={{ color: '#0f172a', margin: '0 0 0.5rem' }}>No Feedbacks Found</h3>
                 <p style={{ color: '#64748b', maxWidth: '420px', margin: '0 auto' }}>
                   {searchTerm || categoryFilter !== 'ALL' || ratingFilter !== 'ALL'
@@ -613,7 +613,7 @@ export default function PublicFeedbackDashboard() {
                             {fb.client?.name || 'Verified Client'}
                           </strong>
                           <span className="pill-badge active" style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}>
-                            ✓ Verified Client
+                            Verified Client
                           </span>
                           <span style={{
                             fontSize: '0.75rem',

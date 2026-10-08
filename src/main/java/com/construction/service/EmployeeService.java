@@ -455,22 +455,13 @@ public class EmployeeService {
             if (checkIn == null || checkIn.isBlank()) {
                 checkIn = "08:00";
             }
-            if (checkOut == null || checkOut.isBlank()) {
-                checkOut = "17:00";
-            }
         } else if ("LATE".equalsIgnoreCase(rawStatus)) {
             if (checkIn == null || checkIn.isBlank()) {
                 checkIn = "09:30";
             }
-            if (checkOut == null || checkOut.isBlank()) {
-                checkOut = "17:00";
-            }
         } else if ("HALF_DAY".equalsIgnoreCase(rawStatus)) {
             if (checkIn == null || checkIn.isBlank()) {
                 checkIn = "08:00";
-            }
-            if (checkOut == null || checkOut.isBlank()) {
-                checkOut = "12:00";
             }
         }
 
@@ -496,7 +487,25 @@ public class EmployeeService {
 
         Optional<EmployeeAttendance> existing = attendanceRepository.findByEmployeeIdAndDate(employee.getId(), date);
         if (existing.isPresent()) {
-            throw new BadRequestException("Attendance for " + employee.getName() + " on " + date + " is already marked. Attendance can only be marked once and cannot be changed.");
+            EmployeeAttendance existingRecord = existing.get();
+            if (existingRecord.getCheckOutTime() != null && !existingRecord.getCheckOutTime().isBlank()) {
+                throw new BadRequestException("Attendance for " + employee.getName() + " on " + date + " is already marked and completed. Time In & Time Out are locked.");
+            }
+            if (checkOut != null && !checkOut.isBlank()) {
+                if (existingRecord.getCheckInTime() != null) {
+                    java.time.LocalTime inTime = java.time.LocalTime.parse(existingRecord.getCheckInTime().length() == 4 ? "0" + existingRecord.getCheckInTime() : existingRecord.getCheckInTime());
+                    java.time.LocalTime outTime = java.time.LocalTime.parse(checkOut.length() == 4 ? "0" + checkOut : checkOut);
+                    if (!outTime.isAfter(inTime)) {
+                        throw new BadRequestException("Check-out time (" + checkOut + ") must be after check-in time (" + existingRecord.getCheckInTime() + ")");
+                    }
+                }
+                existingRecord.setCheckOutTime(checkOut);
+                if (input.getRemarks() != null && !input.getRemarks().isBlank() && !"Unavailable".equalsIgnoreCase(input.getRemarks())) {
+                    existingRecord.setRemarks(input.getRemarks().trim());
+                }
+                return attendanceRepository.save(existingRecord);
+            }
+            throw new BadRequestException("Time In for " + employee.getName() + " on " + date + " is already recorded. Please record Time Out to complete the day's attendance.");
         }
 
         EmployeeAttendance attendance = new EmployeeAttendance();
@@ -518,6 +527,38 @@ public class EmployeeService {
         attendance.setRecordedBy(input.getRecordedBy() != null ? input.getRecordedBy() : "Employee Manager");
 
         return attendanceRepository.save(attendance);
+    }
+
+    public EmployeeAttendance recordCheckOut(Long attendanceId, String checkOutTime, String remarks) {
+        EmployeeAttendance record = attendanceRepository.findById(attendanceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Attendance record not found with id " + attendanceId));
+
+        if (record.getCheckOutTime() != null && !record.getCheckOutTime().isBlank()) {
+            throw new BadRequestException("Check-out has already been recorded for this employee today (" + record.getCheckOutTime() + ").");
+        }
+
+        if ("ABSENT".equalsIgnoreCase(record.getStatus()) || "ON_LEAVE".equalsIgnoreCase(record.getStatus())) {
+            throw new BadRequestException("Cannot record check-out for employee marked as " + record.getStatus());
+        }
+
+        String finalCheckOut = checkOutTime != null && !checkOutTime.isBlank() ? checkOutTime.trim() : "17:00";
+        if (!finalCheckOut.matches("^([01]?[0-9]|2[0-3]):[0-5][0-9]$")) {
+            throw new BadRequestException("Check-out time must be a valid 24-hour time in HH:mm format (e.g. 17:00)");
+        }
+
+        if (record.getCheckInTime() != null && !record.getCheckInTime().isBlank()) {
+            java.time.LocalTime inTime = java.time.LocalTime.parse(record.getCheckInTime().length() == 4 ? "0" + record.getCheckInTime() : record.getCheckInTime());
+            java.time.LocalTime outTime = java.time.LocalTime.parse(finalCheckOut.length() == 4 ? "0" + finalCheckOut : finalCheckOut);
+            if (!outTime.isAfter(inTime)) {
+                throw new BadRequestException("Check-out time (" + finalCheckOut + ") must be after check-in time (" + record.getCheckInTime() + ")");
+            }
+        }
+
+        record.setCheckOutTime(finalCheckOut);
+        if (remarks != null && !remarks.isBlank() && !"Unavailable".equalsIgnoreCase(remarks)) {
+            record.setRemarks(remarks.trim());
+        }
+        return attendanceRepository.save(record);
     }
 
     public List<EmployeeAttendance> getAttendanceRecords(Long employeeId, LocalDate date, String status) {

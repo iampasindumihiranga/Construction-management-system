@@ -15,6 +15,7 @@ import {
   getMaterialRequests,
   getProjects,
 } from '../services/api';
+import { downloadFile, exportCsv } from '../utils/documentDownload';
 
 export default function SiteManagerDashboard() {
   const { user } = useAuth();
@@ -110,7 +111,7 @@ export default function SiteManagerDashboard() {
         reportedBy: `Site Manager (${user?.displayName || user?.username || 'Site Lead'})`,
       });
 
-      setNotice('✓ Stock alert and low-stock notice successfully transmitted to Inventory Manager!');
+      setNotice('Stock alert and low-stock notice successfully transmitted to Inventory Manager!');
       setAlertForm({
         materialId: '',
         currentSiteStock: '',
@@ -140,7 +141,7 @@ export default function SiteManagerDashboard() {
         quantity: Number(updateQty),
       };
       await updateMaterial(selectedMaterial.id, updated);
-      setNotice(`✓ Stock count for ${selectedMaterial.name} updated to ${updateQty} ${selectedMaterial.unit || 'units'}.`);
+      setNotice(`Stock count for ${selectedMaterial.name} updated to ${updateQty} ${selectedMaterial.unit || 'units'}.`);
       setSelectedMaterial(null);
       await loadAll();
       setTimeout(() => setNotice(''), 4000);
@@ -170,7 +171,7 @@ export default function SiteManagerDashboard() {
         remarks: (requestForm.notes ? requestForm.notes.trim() + ' ' : '') + (requestForm.priority ? `[Priority: ${requestForm.priority}]` : ''),
         requestedBy: `Site Manager (${user?.displayName || user?.username || 'Site Lead'})`,
       });
-      setNotice('✓ Material request submitted for Inventory Manager approval.');
+      setNotice('Material request submitted for Inventory Manager approval.');
       setRequestForm({
         materialId: '',
         projectId: projects[0]?.id ? String(projects[0].id) : '',
@@ -239,7 +240,7 @@ export default function SiteManagerDashboard() {
         )}
         {error && (
           <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
-            ⚠️ {error}
+            {error}
           </div>
         )}
 
@@ -290,6 +291,21 @@ export default function SiteManagerDashboard() {
           >
             Request Material Dispatch
           </button>
+          <button
+            onClick={() => setTab('documents')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: tab === 'documents' ? '#b45309' : '#f3f4f6',
+              color: tab === 'documents' ? '#ffffff' : '#374151',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontSize: '0.95rem',
+            }}
+          >
+            Documents &amp; Site Vault
+          </button>
         </div>
 
         {/* TAB 1: LOW STOCK INFORMER & ALERTS (Requirement 5) */}
@@ -299,7 +315,7 @@ export default function SiteManagerDashboard() {
               {/* Informer Form */}
               <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                 <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.3rem' }}>
-                  🚨 Inform Inventory Manager of Stock Status
+                  Inform Inventory Manager of Stock Status
                 </h3>
                 <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
                   Report on-site material levels and notify if critical construction items are running low.
@@ -371,8 +387,8 @@ export default function SiteManagerDashboard() {
                         onChange={(e) => setAlertForm({ ...alertForm, isLowStock: e.target.value === 'YES' })}
                         style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
                       >
-                        <option value="YES">⚠️ YES - Critical / Low Stock</option>
-                        <option value="NO">✓ NO - Stock Adequate</option>
+                        <option value="YES">YES - Critical / Low Stock</option>
+                        <option value="NO">NO - Stock Adequate</option>
                       </select>
                     </div>
 
@@ -433,7 +449,7 @@ export default function SiteManagerDashboard() {
                       fontSize: '0.95rem',
                     }}
                   >
-                    {submittingAlert ? 'Transmitting Alert...' : '🚀 Transmit Stock Alert to Inventory Manager'}
+                    {submittingAlert ? 'Transmitting Alert...' : 'Transmit Stock Alert to Inventory Manager'}
                   </button>
                 </form>
               </div>
@@ -442,7 +458,7 @@ export default function SiteManagerDashboard() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '20px' }}>
                   <h4 style={{ margin: '0 0 8px', color: '#92400e', fontSize: '1.1rem' }}>
-                    👷 Role Responsibilities: Site Manager
+                    Role Responsibilities: Site Manager
                   </h4>
                   <ul style={{ margin: 0, paddingLeft: '20px', color: '#78350f', fontSize: '0.85rem', lineHeight: '1.6' }}>
                     <li>Perform physical inspections of stock stockpiles at the job site daily.</li>
@@ -453,7 +469,7 @@ export default function SiteManagerDashboard() {
 
                 <div style={{ background: '#ffffff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                   <h4 style={{ margin: '0 0 12px', color: '#111827', fontSize: '1.1rem' }}>
-                    📊 Live Stock Summary
+                    Live Stock Summary
                   </h4>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div style={{ background: '#f9fafb', padding: '12px', borderRadius: '8px' }}>
@@ -472,7 +488,7 @@ export default function SiteManagerDashboard() {
             {/* Alert History Table */}
             <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
               <h3 style={{ margin: '0 0 16px', color: '#111827', fontSize: '1.2rem' }}>
-                📋 Historical Stock Alerts Sent to Inventory Manager
+                Historical Stock Alerts Sent to Inventory Manager
               </h3>
 
               <div style={{ overflowX: 'auto' }}>
@@ -532,7 +548,7 @@ export default function SiteManagerDashboard() {
                             </span>
                           </td>
                           <td style={{ padding: '12px 16px', fontSize: '0.85rem', color: '#4b5563' }}>
-                            <div>📍 {alert.siteLocation || 'Site A'}</div>
+                            <div>{alert.siteLocation || 'Site A'}</div>
                             {alert.notes && <small style={{ color: '#6b7280' }}>"{alert.notes}"</small>}
                           </td>
                           <td style={{ padding: '12px 16px' }}>
@@ -575,7 +591,7 @@ export default function SiteManagerDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.3rem' }}>
-                  📦 Construction Materials Catalog &amp; On-Site Stock
+                  Construction Materials Catalog &amp; On-Site Stock
                 </h3>
                 <p style={{ color: '#6b7280', margin: 0, fontSize: '0.85rem' }}>
                   Search construction inventory, monitor minimum thresholds, and adjust physical on-site count.
@@ -666,7 +682,7 @@ export default function SiteManagerDashboard() {
                                 cursor: 'pointer',
                               }}
                             >
-                              ✏️ Update Stock
+                              Update Stock
                             </button>
                             <button
                               type="button"
@@ -691,7 +707,7 @@ export default function SiteManagerDashboard() {
                                 cursor: 'pointer',
                               }}
                             >
-                              🚨 Alert Low Stock
+                              Alert Low Stock
                             </button>
                           </div>
                         </td>
@@ -753,7 +769,7 @@ export default function SiteManagerDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div style={{ maxWidth: '600px', margin: '0 auto', background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', width: '100%' }}>
             <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.3rem' }}>
-              📝 Submit Material Dispatch Request
+              Submit Material Dispatch Request
             </h3>
             <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
               Request materials to be issued from the main warehouse to your construction site.
@@ -854,7 +870,7 @@ export default function SiteManagerDashboard() {
                   fontSize: '0.95rem',
                 }}
               >
-                {submittingReq ? 'Submitting Request...' : '📨 Submit Material Dispatch Request'}
+                {submittingReq ? 'Submitting Request...' : 'Submit Material Dispatch Request'}
               </button>
             </form>
           </div>
@@ -942,6 +958,179 @@ export default function SiteManagerDashboard() {
               </div>
             )}
           </div>
+          </div>
+        )}
+
+        {/* TAB 4: DOCUMENTS & SITE ENGINEERING VAULT */}
+        {tab === 'documents' && (
+          <div>
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                <div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                    SITE FIELD OPERATIONS VAULT
+                  </span>
+                  <h2 style={{ margin: '6px 0 2px', color: '#111827', fontSize: '1.4rem', fontWeight: 800 }}>
+                    Site Engineering &amp; Operations Vault
+                  </h2>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.88rem' }}>
+                    Download official site inspection checklists, concrete slump/cube test records, material requisition slips, and safety protocols.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportCsv(
+                        materials.map((m) => ({
+                          'Material Code': m.materialCode,
+                          'Material Name': m.name,
+                          'Category': m.category,
+                          'Available Stock': m.quantity,
+                          'Unit': m.unit,
+                          'Min Level': m.minStockLevel,
+                          'Location': m.location || 'Warehouse',
+                        })),
+                        `Odiliya_Site_Materials_Roster_${new Date().toISOString().slice(0, 10)}`
+                      );
+                    }}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#b45309',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Export Site Stock (CSV)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportCsv(
+                        materialRequests.map((r) => ({
+                          'Request Code': r.requestCode || `#REQ-${r.id}`,
+                          'Date': r.requestDate || r.createdAt,
+                          'Project': r.project?.name || 'Site',
+                          'Material': r.material?.name || 'Item',
+                          'Quantity': r.requestedQuantity || r.quantity,
+                          'Status': r.status,
+                          'Reviewed By': r.approvedBy || 'Pending',
+                          'Remarks': r.remarks || '—',
+                        })),
+                        `Odiliya_Site_Requisitions_${new Date().toISOString().slice(0, 10)}`
+                      );
+                    }}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Export Requisitions (CSV)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Site Document Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+              {/* Card 1: Site Logs & Quality Inspection Sheets */}
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem' }}>
+                  Site Engineering Logs &amp; Quality Records
+                </h3>
+                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
+                  Official site supervisor daily logging forms and concrete testing records.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { name: 'Odiliya_Site_Daily_Work_Log_Sheet.pdf', size: '280 KB', desc: 'Daily labor count, weather condition & machine hour log' },
+                    { name: 'Odiliya_Concrete_Pouring_and_Cube_Test_Record.pdf', size: '410 KB', desc: 'Grade 25/30 slump test & 7/28 day compressive strength record' },
+                    { name: 'Odiliya_Reinforcement_Steel_Bar_Bending_Schedule.pdf', size: '890 KB', desc: 'Rebar cutting, bending & lap length compliance sheet' },
+                    { name: 'Odiliya_Site_Material_Requisition_Slip.pdf', size: '190 KB', desc: 'Physical dispatch authorization voucher for warehouse driver' },
+                  ].map((doc) => (
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(null, doc.name)}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#fef3c7',
+                          color: '#92400e',
+                          border: '1px solid #fde68a',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Card 2: Site Safety & Hazard Protocols */}
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem' }}>
+                  Site Safety &amp; Scaffolding Protocols
+                </h3>
+                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
+                  Mandatory site health &amp; safety inspection checklists and toolbox talk manuals.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { name: 'Odiliya_Site_Safety_Inspection_Checklist.pdf', size: '520 KB', desc: 'Weekly site hazard audit, harness & helmet check' },
+                    { name: 'Odiliya_Toolbox_Talk_Safety_Briefing_Guide.pdf', size: '340 KB', desc: 'Daily morning safety briefing guidelines for site crew' },
+                    { name: 'Odiliya_Scaffolding_and_Formwork_Clearance_Pass.pdf', size: '260 KB', desc: 'Safety green tag inspection pass for working at heights' },
+                    { name: 'Odiliya_Excavation_and_Trenching_Safety_Manual.pdf', size: '480 KB', desc: 'Shoring and deep foundation excavation protocol' },
+                  ].map((doc) => (
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(null, doc.name)}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>

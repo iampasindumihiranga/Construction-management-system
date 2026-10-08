@@ -185,7 +185,7 @@ export default function Login() {
 
             {error && (
               <div className="light-alert alert-danger portal-login-error">
-                <span className="alert-icon">⚠️</span>
+                
                 <span>{error}</span>
               </div>
             )}

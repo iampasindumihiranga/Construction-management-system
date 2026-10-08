@@ -31,6 +31,7 @@ import {
   formatDate,
   formatMoney,
 } from '../services/api';
+import { downloadFile, exportCsv } from '../utils/documentDownload';
 
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -1610,7 +1611,7 @@ export default function ClientDashboard() {
                               }}
                               title="Remove image"
                             >
-                              ✕
+                              ×
                             </button>
                             <span style={{ position: 'absolute', bottom: '2px', left: '2px', background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: '9px', padding: '1px 4px', borderRadius: '4px' }}>
                               Photo {idx + 1}
@@ -1663,7 +1664,7 @@ export default function ClientDashboard() {
 
                 {projectRequests.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '3rem' }}>
-                    <span style={{ fontSize: '3rem', display: 'block', marginBottom: '0.5rem' }}>📋</span>
+                    
                     <h4>No Project Requests Submitted Yet</h4>
                     <p className="text-muted">Browse our company designs or submit your own custom design to get started.</p>
                     <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1rem' }}>
@@ -1776,7 +1777,7 @@ export default function ClientDashboard() {
                             <div style={{ marginTop: '1rem', padding: '1.25rem', background: '#f0fdf4', borderLeft: '4px solid var(--brand-green)', borderRadius: '0 8px 8px 0' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                 <strong style={{ color: 'var(--brand-green)', fontSize: '0.95rem' }}>
-                                  ✉️ Official Proposal &amp; Response from {req.clientNotifiedBy || 'Client Manager'}:
+                                  Official Proposal & Response from {req.clientNotifiedBy || 'Client Manager'}:
                                 </strong>
                                 <small style={{ color: 'var(--text-muted)' }}>{formatDate(req.clientNotifiedAt)}</small>
                               </div>
@@ -1804,7 +1805,7 @@ export default function ClientDashboard() {
                           {isStarted && (
                             <div style={{ marginTop: '0.85rem', padding: '0.85rem 1rem', background: '#ecfdf5', borderLeft: '4px solid #10b981', borderRadius: '0 8px 8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                               <div>
-                                <strong style={{ color: '#047857' }}>🚀 Construction Project Initialized &amp; Assigned!</strong>
+                                <strong style={{ color: '#047857' }}>Construction Project Initialized & Assigned!</strong>
                                 <p style={{ margin: '0.2rem 0 0', color: '#065f46', fontSize: '0.88rem' }}>The Project Manager has officially started your construction project. Check live milestones and updates under My Projects.</p>
                               </div>
                               <button
@@ -1981,7 +1982,7 @@ export default function ClientDashboard() {
                             </small>
                             {(inq.design || inq.project) && (
                               <small style={{ color: '#0369a1', fontWeight: 600 }}>
-                                🏠 {inq.design ? 'Design' : 'Project'}: {(inq.design || inq.project).name}
+                                {inq.design ? 'Design' : 'Project'}: {(inq.design || inq.project).name}
                               </small>
                             )}
                           </div>
@@ -1994,7 +1995,7 @@ export default function ClientDashboard() {
                           border: `1px solid ${inq.status === 'ANSWERED' ? '#bbf7d0' : '#fde68a'}`,
                           padding: '0.25rem 0.65rem',
                         }}>
-                          {inq.status === 'ANSWERED' ? '✓ New Reply from Manager' : '⏳ Awaiting Manager'}
+                          {inq.status === 'ANSWERED' ? 'New Reply from Manager' : 'Awaiting Manager'}
                         </span>
                       </div>
 
@@ -2004,7 +2005,7 @@ export default function ClientDashboard() {
                       {inq.attachmentData && (
                         <div style={{ margin: '0.5rem 0' }}>
                           <a href={inq.attachmentData} download={inq.attachmentName || 'inquiry-attachment'} className="btn-outline-green" style={{ display: 'inline-flex', fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}>
-                            📎 View attachment: {inq.attachmentName || 'attachment'}
+                            View attachment: {inq.attachmentName || 'attachment'}
                           </a>
                         </div>
                       )}
@@ -2062,7 +2063,7 @@ export default function ClientDashboard() {
                               setClientReplyText('');
                             }}
                           >
-                            💬 Reply to Message
+                            Reply to Message
                           </button>
                         </div>
                       )}
@@ -2165,7 +2166,14 @@ export default function ClientDashboard() {
                           <td>{d.uploadedByRole === 'CLIENT' ? 'You' : 'Client Manager'}</td>
                           <td>{formatDate(d.uploadedAt)}</td>
                           <td>
-                            {d.fileData ? <a href={d.fileData} download={d.fileName || d.title} className="btn-outline-green" style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem' }}>Download</a> : <span className="text-muted">No file</span>}
+                            <button
+                              type="button"
+                              onClick={() => downloadFile(d.fileData, d.fileName || d.title)}
+                              className="btn-outline-green"
+                              style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem', cursor: 'pointer' }}
+                            >
+                              Download
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -2175,6 +2183,41 @@ export default function ClientDashboard() {
               ) : (
                 <p className="text-muted">No documents uploaded yet.</p>
               )}
+            </div>
+
+            {/* Standard Client Legal & Warranty Downloads */}
+            <div className="light-panel-card" style={{ marginTop: '1.5rem' }}>
+              <div className="panel-card-head">
+                <div>
+                  <span className="brand-green-subtitle">OFFICIAL TEMPLATES &amp; POLICIES</span>
+                  <h3 className="panel-title">Standard Client Contracts &amp; Warranty Guides</h3>
+                  <p className="panel-meta">Download standard construction contracts, warranty guarantees, and milestone payment schedules.</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                {[
+                  { name: 'Odiliya_Standard_Client_Construction_Agreement.pdf', size: '480 KB', desc: 'Official master client-builder construction agreement' },
+                  { name: 'Odiliya_Structural_and_Waterproofing_Warranty.pdf', size: '320 KB', desc: '10-Year structural guarantee & 5-year waterproofing policy' },
+                  { name: 'Odiliya_Milestone_Payment_Schedule_Policy.pdf', size: '240 KB', desc: 'Standard stage payment terms and certification steps' },
+                  { name: 'Odiliya_Custom_Home_Finishing_Specifications.pdf', size: '1.2 MB', desc: 'Material grade, fixtures, fittings and brand standards' },
+                ].map((doc) => (
+                  <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <div style={{ flex: 1, marginRight: '0.5rem' }}>
+                      <strong style={{ fontSize: '0.85rem', color: '#0f172a', display: 'block' }}>{doc.name}</strong>
+                      <small style={{ color: '#64748b', fontSize: '0.75rem' }}>{doc.desc} • {doc.size}</small>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => downloadFile(null, doc.name)}
+                      className="btn-outline-green"
+                      style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -2197,11 +2240,11 @@ export default function ClientDashboard() {
                   <div className="form-input-box">
                     <label>Star Rating *</label>
                     <select value={feedbackRating} onChange={(e) => setFeedbackRating(e.target.value)} required>
-                      <option value={5}>⭐⭐⭐⭐⭐ — Excellent (5)</option>
-                      <option value={4}>⭐⭐⭐⭐ — Very Good (4)</option>
-                      <option value={3}>⭐⭐⭐ — Average (3)</option>
-                      <option value={2}>⭐⭐ — Below Average (2)</option>
-                      <option value={1}>⭐ — Poor (1)</option>
+                      <option value={5}>5 — Excellent</option>
+                      <option value={4}>4 — Very Good</option>
+                      <option value={3}>3 — Average</option>
+                      <option value={2}>2 — Below Average</option>
+                      <option value={1}>1 — Poor</option>
                     </select>
                   </div>
 
@@ -2272,7 +2315,7 @@ export default function ClientDashboard() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                         <div>
                           <span style={{ fontSize: '1.25rem' }}>
-                            {'⭐'.repeat(fb.rating || 0)}
+                            {fb.rating ? `${fb.rating} / 5` : 'N/A'}
                           </span>
                           <span style={{ marginLeft: '0.5rem', fontWeight: 600, color: 'var(--brand-green)' }}>
                             {fb.rating}/5
@@ -3061,13 +3104,13 @@ export default function ClientDashboard() {
                   {/* Trust & Guarantee points */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.82rem', color: '#64748b' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> Instant authorization — direct payment completion
+                      Instant authorization — direct payment completion
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> Official confirmation message sent to your account immediately
+                      Official confirmation message sent to your account immediately
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> Verified directly with your Client Manager ledger
+                      Verified directly with your Client Manager ledger
                     </div>
                   </div>
                 </div>
@@ -3358,7 +3401,7 @@ export default function ClientDashboard() {
             <div className="modal-box" style={{ maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>Receipt Preview</h3>
-                <button className="modal-close-btn" onClick={() => setReceiptViewModal(null)}>✕</button>
+                <button className="modal-close-btn" onClick={() => setReceiptViewModal(null)}>×</button>
               </div>
               <div style={{ padding: '1rem 0' }}>
                 {receiptViewModal.receipt ? (
@@ -3370,7 +3413,7 @@ export default function ClientDashboard() {
                     />
                   ) : (
                     <div style={{ textAlign: 'center', padding: '2rem' }}>
-                      <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📄</div>
+                      
                       <p>{receiptViewModal.fileName || 'Receipt file'}</p>
                       <a href={receiptViewModal.receipt} download={receiptViewModal.fileName || 'receipt'} className="btn-solid-green">
                         Download Receipt
@@ -3394,7 +3437,7 @@ export default function ClientDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL INQUIRY TO CLIENT MANAGER</span>
                   <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Inquire: {designInquiryTarget.name}</h3>
                 </div>
-                <button type="button" onClick={() => { setDesignInquiryModalOpen(false); setDesignInquiryTarget(null); }}>✕</button>
+                <button type="button" onClick={() => { setDesignInquiryModalOpen(false); setDesignInquiryTarget(null); }}>×</button>
               </div>
 
               <form onSubmit={handleSubmitDesignInquiry} style={{ marginTop: '1.25rem' }}>
@@ -3454,7 +3497,7 @@ export default function ClientDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL PROJECT REQUEST</span>
                   <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Request Project: {designRequestModal.name}</h3>
                 </div>
-                <button type="button" onClick={() => setDesignRequestModal(null)}>✕</button>
+                <button type="button" onClick={() => setDesignRequestModal(null)}>×</button>
               </div>
 
               <form onSubmit={handleSubmitDesignRequest} style={{ marginTop: '1.25rem' }}>
@@ -3547,7 +3590,7 @@ export default function ClientDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>PROJECT REQUEST DETAILS</span>
                   <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>{selectedRequestDetails.title}</h3>
                 </div>
-                <button type="button" onClick={() => setSelectedRequestDetails(null)}>✕</button>
+                <button type="button" onClick={() => setSelectedRequestDetails(null)}>×</button>
               </div>
 
               <div style={{ marginTop: '1rem' }}>

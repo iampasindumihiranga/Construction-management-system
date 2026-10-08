@@ -42,7 +42,7 @@ import {
   formatDate,
   formatMoney,
 } from '../services/api';
-
+import { downloadFile, exportCsv } from '../utils/documentDownload';
 
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -1315,7 +1315,7 @@ export default function ClientManagerDashboard() {
                       <td>
                         <strong>{p.name}</strong>
                         <small style={{ display: 'block', marginTop: '3px', background: '#f1f5f9', color: '#475569', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', width: 'fit-content' }}>
-                          📷 {(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls.length : (p.imageUrl ? 1 : 0)} / 5 images
+                          {(p.imageUrls && p.imageUrls.length > 0) ? p.imageUrls.length : (p.imageUrl ? 1 : 0)} / 5 images
                         </small>
                       </td>
                       <td><span className="pill-badge active">{p.category}</span></td>
@@ -1389,7 +1389,7 @@ export default function ClientManagerDashboard() {
                 <p className="panel-meta" style={{ margin: 0 }}>Review customer inquiries, send new inquiries to clients, and continue conversations with them.</p>
               </div>
               <button type="button" className="btn-solid-green" onClick={openComposeInquiry}>
-                ✉️ New Inquiry to Client
+                New Inquiry to Client
               </button>
             </div>
 
@@ -1497,23 +1497,23 @@ export default function ClientManagerDashboard() {
                             <strong style={{ fontSize: '1.18rem', color: '#0f172a' }}>{inq.subject}</strong>
                             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.35rem', fontSize: '0.88rem' }}>
                               <span style={{ color: 'var(--brand-green)', fontWeight: 700 }}>
-                                👤 Client: {inq.client?.name || 'Unknown'}
+                                Client: {inq.client?.name || 'Unknown'}
                               </span>
                               <span style={{ color: '#475569' }}>
-                                ✉️ <a href={`mailto:${inq.client?.email}`} style={{ color: '#2563eb' }}>{inq.client?.email || 'No email'}</a>
+                                <a href={`mailto:${inq.client?.email}`} style={{ color: '#2563eb' }}>{inq.client?.email || 'No email'}</a>
                               </span>
                               {inq.client?.phone && (
                                 <span style={{ color: '#475569' }}>
-                                  📞 <a href={`tel:${inq.client.phone}`} style={{ color: '#475569' }}>{inq.client.phone}</a>
+                                  <a href={`tel:${inq.client.phone}`} style={{ color: '#475569' }}>{inq.client.phone}</a>
                                 </span>
                               )}
                               {(inq.design || inq.project) && (
                                 <span style={{ color: '#0369a1', fontWeight: 600 }}>
-                                  🏠 {inq.design ? 'Design' : 'Project'}: {(inq.design || inq.project).name}
+                                  {inq.design ? 'Design' : 'Project'}: {(inq.design || inq.project).name}
                                 </span>
                               )}
                               {inq.initiatedBy === 'CLIENT_MANAGER' && (
-                                <span style={{ color: '#7c3aed', fontWeight: 600 }}>📤 Sent by Client Manager</span>
+                                <span style={{ color: '#7c3aed', fontWeight: 600 }}>Sent by Client Manager</span>
                               )}
                             </div>
                           </div>
@@ -1526,10 +1526,10 @@ export default function ClientManagerDashboard() {
                               border: `1px solid ${inq.status === 'ANSWERED' ? '#bbf7d0' : '#fde68a'}`,
                               padding: '0.3rem 0.75rem'
                             }}>
-                              {inq.status === 'ANSWERED' ? '✓ Awaiting Client Reply' : 'Action Required'}
+                              {inq.status === 'ANSWERED' ? 'Awaiting Client Reply' : 'Action Required'}
                             </span>
                             <span style={{ fontSize: '0.82rem', color: '#64748b', fontWeight: 600 }}>
-                              📅 {inq.createdAt ? formatDate(inq.createdAt) : '-'}
+                              {inq.createdAt ? formatDate(inq.createdAt) : '-'}
                             </span>
                           </div>
                         </div>
@@ -1539,7 +1539,7 @@ export default function ClientManagerDashboard() {
                         {inq.attachmentData && (
                           <div style={{ marginBottom: '0.75rem' }}>
                             <a href={inq.attachmentData} download={inq.attachmentName || 'client-attachment'} className="btn-outline-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}>
-                              📎 Download Client Attachment: {inq.attachmentName || 'attachment'}
+                              Download Client Attachment: {inq.attachmentName || 'attachment'}
                             </a>
                           </div>
                         )}
@@ -1565,7 +1565,7 @@ export default function ClientManagerDashboard() {
                                 }}
                                 style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.85rem' }}
                               >
-                                Cancel ✕
+                                Cancel ×
                               </button>
                             </div>
 
@@ -1577,7 +1577,7 @@ export default function ClientManagerDashboard() {
                                 style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
                                 onClick={() => setInlineReplyText("Thank you for reaching out to Odiliya Homes. We have received your inquiry and our team will schedule a detailed consultation session with you shortly.")}
                               >
-                                📅 Consultation
+                                Consultation
                               </button>
                               <button
                                 type="button"
@@ -1585,7 +1585,7 @@ export default function ClientManagerDashboard() {
                                 style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
                                 onClick={() => setInlineReplyText("Thank you for your inquiry. We are reviewing your project specifications and will prepare a customized quotation within 2 business days.")}
                               >
-                                💰 Quotation
+                                Quotation
                               </button>
                               <button
                                 type="button"
@@ -1593,7 +1593,7 @@ export default function ClientManagerDashboard() {
                                 style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
                                 onClick={() => setInlineReplyText("We would be delighted to arrange a site inspection and showroom visit at your convenience. Please let us know your preferred date and time.")}
                               >
-                                🏡 Site Visit
+                                Site Visit
                               </button>
                             </div>
 
@@ -1640,7 +1640,7 @@ export default function ClientManagerDashboard() {
                                 setResponseModalOpen(true);
                               }}
                             >
-                              💬 Reply to Client
+                              Reply to Client
                             </button>
 
                             <button
@@ -1668,62 +1668,121 @@ export default function ClientManagerDashboard() {
 
         {/* TAB 7: DOCUMENTS */}
         {activeTab === 'documents' && (
-          <div className="light-panel-card">
-            <div className="panel-card-head">
-              <div>
-                <span className="brand-green-subtitle">VAULT</span>
-                <h3 className="panel-title">Project Documents Repository</h3>
+          <div>
+            <div className="light-panel-card">
+              <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <span className="brand-green-subtitle">VAULT</span>
+                  <h3 className="panel-title">Project Documents &amp; Contracts Repository</h3>
+                  <p className="panel-meta">Manage client documents, title deeds, legal contracts, and payment remittances.</p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-outline-green"
+                    onClick={() => {
+                      exportCsv(
+                        clients.map((c) => ({
+                          'Client ID': c.id,
+                          'Full Name': c.name,
+                          'Email': c.email,
+                          'Phone': c.phone || '—',
+                          'Status': c.status,
+                          'Preferred Category': c.preferredCategory || 'RESIDENCIES',
+                          'Address': c.address || '—',
+                        })),
+                        `Odiliya_Clients_Master_List_${new Date().toISOString().slice(0, 10)}`
+                      );
+                    }}
+                    style={{ padding: '0.45rem 0.9rem', fontSize: '0.82rem' }}
+                  >
+                    Export Clients (CSV)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-solid-green"
+                    onClick={() => {
+                      setDocForm({ title: '', documentType: 'CONTRACT_DEED', description: '', clientId: clients[0]?.id ? String(clients[0].id) : '', projectId: projects[0]?.id ? String(projects[0].id) : '', file: null });
+                      setDocModalOpen(true);
+                    }}
+                  >
+                    + Upload Document for Client
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                className="btn-solid-green"
-                onClick={() => {
-                  setDocForm({ title: '', documentType: 'CONTRACT_DEED', description: '', clientId: clients[0]?.id ? String(clients[0].id) : '', projectId: projects[0]?.id ? String(projects[0].id) : '', file: null });
-                  setDocModalOpen(true);
-                }}
-              >
-                + Upload Document for Client
-              </button>
-            </div>
 
-            <div className="table-responsive-box">
-              <table className="light-table">
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Type</th>
-                    <th>Target Client</th>
-                    <th>Uploaded By</th>
-                    <th>File Name</th>
-                    <th>Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.map((d) => (
-                    <tr key={d.id}>
-                      <td><strong>{d.title}</strong></td>
-                      <td><span className="pill-badge active">{d.documentType}</span></td>
-                      <td>{d.client?.name || '-'}</td>
-                      <td>{d.uploadedByRole === 'CLIENT' ? 'Client Upload' : 'Client Manager'}</td>
-                      <td>{d.fileName}</td>
-                      <td>{formatDate(d.uploadedAt)}</td>
-                      <td>
-                        {d.fileData ? (
-                          <a
-                            href={d.fileData}
-                            download={d.fileName || d.title || 'document'}
+              <div className="table-responsive-box">
+                <table className="light-table">
+                  <thead>
+                    <tr>
+                      <th>Title</th>
+                      <th>Type</th>
+                      <th>Target Client</th>
+                      <th>Uploaded By</th>
+                      <th>File Name</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documents.map((d) => (
+                      <tr key={d.id}>
+                        <td><strong>{d.title}</strong></td>
+                        <td><span className="pill-badge active">{d.documentType}</span></td>
+                        <td>{d.client?.name || '-'}</td>
+                        <td>{d.uploadedByRole === 'CLIENT' ? 'Client Upload' : 'Client Manager'}</td>
+                        <td>{d.fileName}</td>
+                        <td>{formatDate(d.uploadedAt)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => downloadFile(d.fileData, d.fileName || d.title)}
                             className="btn-outline-green"
-                            style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                            style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem', cursor: 'pointer' }}
                           >
                             Download
-                          </a>
-                        ) : <span className="text-muted">No file attached</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Standard Legal & Contract Templates */}
+            <div className="light-panel-card" style={{ marginTop: '1.5rem' }}>
+              <div className="panel-card-head">
+                <div>
+                  <span className="brand-green-subtitle">LEGAL ASSETS</span>
+                  <h3 className="panel-title">Standard Client Contract Templates</h3>
+                  <p className="panel-meta">Download standard templates to issue to clients or for legal registration.</p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                {[
+                  { name: 'Odiliya_Master_Client_Sales_Contract.pdf', size: '520 KB', desc: 'Standard residential property purchase agreement' },
+                  { name: 'Odiliya_Deed_of_Transfer_and_Title_Clearance.pdf', size: '380 KB', desc: 'Conveyance deed and land registry certification' },
+                  { name: 'Odiliya_Payment_Plan_and_Installment_Agreement.pdf', size: '290 KB', desc: 'Milestone payment breakdown and penalty terms' },
+                  { name: 'Odiliya_Client_KYC_Verification_Form.pdf', size: '180 KB', desc: 'Mandatory client identity and source of funds declaration' },
+                ].map((doc) => (
+                  <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <div style={{ flex: 1, marginRight: '0.5rem' }}>
+                      <strong style={{ fontSize: '0.85rem', color: '#0f172a', display: 'block' }}>{doc.name}</strong>
+                      <small style={{ color: '#64748b', fontSize: '0.75rem' }}>{doc.desc} • {doc.size}</small>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => downloadFile(null, doc.name)}
+                      className="btn-outline-green"
+                      style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -1743,7 +1802,7 @@ export default function ClientManagerDashboard() {
                   <div key={f.id} style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <strong>{f.client?.name || 'Client'} ({f.category?.replace('_', ' ')})</strong>
-                      <span style={{ color: '#f59e0b', fontSize: '1.1rem' }}>{'★'.repeat(f.rating || 5)}{'☆'.repeat(5 - (f.rating || 5))}</span>
+                      <span>Rating: {f.rating || 5} / 5</span>
                     </div>
                     <p style={{ margin: 0, color: '#334155' }}>{f.comments}</p>
                     <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: '0.5rem' }}>{formatDate(f.createdAt)}</small>
@@ -2203,7 +2262,7 @@ export default function ClientManagerDashboard() {
               if (filteredList.length === 0) {
                 return (
                   <div className="light-panel-card" style={{ textAlign: 'center', padding: '3rem' }}>
-                    <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '0.5rem' }}>📭</span>
+                    
                     <h4>No Project Requests found in this filter</h4>
                     <p className="text-muted">Requests submitted by clients from their portal will show up here.</p>
                   </div>
@@ -2249,7 +2308,7 @@ export default function ClientManagerDashboard() {
                             </span>
                             <h3 style={{ margin: '0.2rem 0', color: '#0f172a' }}>{req.title}</h3>
                             <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                              📍 {req.location || 'Location not specified'} &nbsp;|&nbsp; Submitted on {formatDate(req.createdAt)}
+                              {req.location || 'Location not specified'} &nbsp;|&nbsp; Submitted on {formatDate(req.createdAt)}
                             </p>
                           </div>
                           <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
@@ -2257,9 +2316,9 @@ export default function ClientManagerDashboard() {
                             {isForwardedPm && <span className="pill-badge active">Forwarded to PM</span>}
                             {isPmReviewed && <span className="pill-badge active" style={{ background: '#ede9fe', color: '#6d28d9', fontWeight: 700 }}>PM Assessment Complete</span>}
                             {isClientNotified && <span className="pill-badge completed">Client Notified</span>}
-                            {isApproved && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>✓ Approved (Awaiting PM to Start)</span>}
-                            {isStarted && <span className="pill-badge completed" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700 }}>🚀 Project Started</span>}
-                            {isRejected && <span className="pill-badge error" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>✗ Rejected</span>}
+                            {isApproved && <span className="pill-badge completed" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>Approved (Awaiting PM to Start)</span>}
+                            {isStarted && <span className="pill-badge completed" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #10b981', fontWeight: 700 }}>Project Started</span>}
+                            {isRejected && <span className="pill-badge error" style={{ background: '#fee2e2', color: '#b91c1c', fontWeight: 700 }}>Rejected</span>}
                           </div>
                         </div>
 
@@ -2315,7 +2374,7 @@ export default function ClientManagerDashboard() {
                         {req.pmReply && (
                           <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#f5f3ff', borderLeft: '3px solid #7c3aed', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
-                              <strong style={{ color: '#6d28d9' }}>🏗️ Project Manager Engineering Review ({req.pmRespondedBy || 'PM'} on {formatDate(req.pmRespondedAt)}):</strong>
+                              <strong style={{ color: '#6d28d9' }}>Project Manager Engineering Review ({req.pmRespondedBy || 'PM'} on {formatDate(req.pmRespondedAt)}):</strong>
                               {req.pmEstimatedBudget && (
                                 <span style={{ color: '#6d28d9', fontWeight: 700 }}>
                                   Estimated: {formatMoney(req.pmEstimatedBudget)} {req.pmEstimatedDuration ? `| ${req.pmEstimatedDuration}` : ''}
@@ -2337,7 +2396,7 @@ export default function ClientManagerDashboard() {
                         {/* Approved notice */}
                         {isApproved && (
                           <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#f0fdf4', borderLeft: '3px solid #16a34a', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
-                            <strong style={{ color: '#15803d' }}>✓ Approved by {req.approvedBy || 'Client Manager'} on {formatDate(req.approvedAt)}</strong>
+                            <strong style={{ color: '#15803d' }}>Approved by {req.approvedBy || 'Client Manager'} on {formatDate(req.approvedAt)}</strong>
                             <p style={{ margin: '0.2rem 0 0', color: '#166534' }}>Awaiting Project Manager to initialize and assign client to the new construction project.</p>
                           </div>
                         )}
@@ -2345,7 +2404,7 @@ export default function ClientManagerDashboard() {
                         {/* Project started notice */}
                         {isStarted && (
                           <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#ecfdf5', borderLeft: '3px solid #10b981', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
-                            <strong style={{ color: '#047857' }}>🚀 Project Initialized by Project Manager (Project ID #{req.startedProjectId})</strong>
+                            <strong style={{ color: '#047857' }}>Project Initialized by Project Manager (Project ID #{req.startedProjectId})</strong>
                             <p style={{ margin: '0.2rem 0 0', color: '#065f46' }}>Construction project is underway and client is assigned.</p>
                           </div>
                         )}
@@ -2354,7 +2413,7 @@ export default function ClientManagerDashboard() {
                         {req.clientMessage && (
                           <div style={{ marginTop: '0.75rem', padding: '0.85rem 1rem', background: '#f0fdf4', borderLeft: '3px solid #16a34a', borderRadius: '0 6px 6px 0', fontSize: '0.88rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
-                              <strong style={{ color: '#15803d' }}>✉️ Official Message Delivered to Client on {formatDate(req.clientNotifiedAt)}:</strong>
+                              <strong style={{ color: '#15803d' }}>Official Message Delivered to Client on {formatDate(req.clientNotifiedAt)}:</strong>
                               <small style={{ color: 'var(--text-muted)' }}>By {req.clientNotifiedBy || 'Client Manager'}</small>
                             </div>
                             <p style={{ margin: '0.25rem 0 0', color: '#14532d', whiteSpace: 'pre-wrap' }}>{req.clientMessage}</p>
@@ -2371,7 +2430,7 @@ export default function ClientManagerDashboard() {
                                 style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', background: '#16a34a' }}
                                 onClick={() => handleOpenApproveModal(req)}
                               >
-                                ✓ Approve Request
+                                Approve Request
                               </button>
                               <button
                                 type="button"
@@ -2379,7 +2438,7 @@ export default function ClientManagerDashboard() {
                                 style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem', borderColor: '#ef4444', color: '#ef4444' }}
                                 onClick={() => handleOpenRejectModal(req)}
                               >
-                                ✗ Reject Request
+                                Reject Request
                               </button>
                             </>
                           )}
@@ -2399,7 +2458,7 @@ export default function ClientManagerDashboard() {
                             style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
                             onClick={() => handleOpenClientNotifyModal(req)}
                           >
-                            {req.status === 'CLIENT_NOTIFIED' ? 'Update Client Response' : 'Send Response ✉️'}
+                            {req.status === 'CLIENT_NOTIFIED' ? 'Update Client Response' : 'Send Response'}
                           </button>
 
                           <button
@@ -2497,7 +2556,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box">
               <div className="modal-head-row">
                 <h3>{editingClient ? 'Edit Client Profile' : 'Create Client Profile'}</h3>
-                <button type="button" onClick={() => setClientModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setClientModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleSaveClient}>
                 <div className="modal-body-content">
@@ -2550,7 +2609,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box">
               <div className="modal-head-row">
                 <h3>{editingContract ? 'Edit Contract' : 'Record New Contract'}</h3>
-                <button type="button" onClick={() => setContractModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setContractModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleSaveContract}>
                 <div className="modal-body-content">
@@ -2613,7 +2672,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box">
               <div className="modal-head-row">
                 <h3>{editingProject ? 'Edit Client-Visible Design' : 'Add Client-Visible Design'}</h3>
-                <button type="button" onClick={() => setProjectModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setProjectModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleSaveProject}>
                 <div className="modal-body-content">
@@ -2649,7 +2708,7 @@ export default function ClientManagerDashboard() {
                           Client Design Images (Maximum 5 Images)
                         </label>
                         <small style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
-                          Upload up to 5 photos per design. The first image marked ★ Cover is displayed in catalogs.
+                          Upload up to 5 photos per design. The first image marked Cover is displayed in catalogs.
                         </small>
                       </div>
                       <span style={{
@@ -2680,7 +2739,7 @@ export default function ClientManagerDashboard() {
                           background: '#047857',
                         }}
                       >
-                        <span>📁 Choose Images (Up to 5)</span>
+                        <span>Choose Images (Up to 5)</span>
                         <input
                           type="file"
                           accept="image/png,image/jpeg,image/webp"
@@ -2728,7 +2787,7 @@ export default function ClientManagerDashboard() {
                             padding: '1px 5px',
                             borderRadius: '3px',
                           }}>
-                            {idx === 0 ? '★ Cover' : `#${idx + 1}`}
+                            {idx === 0 ? 'Cover' : `#${idx + 1}`}
                           </span>
 
                           <div style={{ position: 'absolute', top: '3px', right: '3px', display: 'flex', gap: '3px' }}>
@@ -2751,7 +2810,7 @@ export default function ClientManagerDashboard() {
                                   cursor: 'pointer',
                                 }}
                               >
-                                ★
+                                
                               </button>
                             )}
                             <button
@@ -2772,7 +2831,7 @@ export default function ClientManagerDashboard() {
                                 cursor: 'pointer',
                               }}
                             >
-                              ✕
+                              ×
                             </button>
                           </div>
                         </div>
@@ -2796,7 +2855,7 @@ export default function ClientManagerDashboard() {
                             gap: '3px',
                           }}
                         >
-                          <span style={{ fontSize: '1.1rem', opacity: 0.5 }}>📷</span>
+                          
                           <span>Image {(projectForm.imageUrls?.length || 0) + emptyIdx + 1}</span>
                         </div>
                       ))}
@@ -2830,7 +2889,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box">
               <div className="modal-head-row">
                 <h3>Add Milestone (US-CM-18)</h3>
-                <button type="button" onClick={() => setMilestoneModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setMilestoneModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleAddMilestone}>
                 <div className="modal-body-content">
@@ -2871,14 +2930,14 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box" style={{ maxWidth: '640px' }}>
               <div className="modal-head-row">
                 <h3 style={{ margin: 0, color: '#0f172a' }}>Reply to Client Inquiry</h3>
-                <button type="button" onClick={() => setResponseModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setResponseModalOpen(false)}>×</button>
               </div>
               <form onSubmit={(e) => handleRespondInquiry(e)}>
                 <div className="modal-body-content">
                   <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: '1rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                       <strong style={{ color: 'var(--brand-green)', fontSize: '0.95rem' }}>
-                        👤 {activeInquiry.client?.name || 'Client'} ({activeInquiry.client?.email || 'No email'})
+                        {activeInquiry.client?.name || 'Client'} ({activeInquiry.client?.email || 'No email'})
                       </strong>
                       <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
                         {activeInquiry.createdAt ? formatDate(activeInquiry.createdAt) : ''}
@@ -2904,7 +2963,7 @@ export default function ClientManagerDashboard() {
                         style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
                         onClick={() => setResponseText("Thank you for reaching out to Odiliya Homes. We have received your inquiry and our team will schedule a detailed consultation session with you shortly.")}
                       >
-                        📅 Consultation
+                        Consultation
                       </button>
                       <button
                         type="button"
@@ -2912,7 +2971,7 @@ export default function ClientManagerDashboard() {
                         style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
                         onClick={() => setResponseText("Thank you for your inquiry. We are reviewing your project specifications and will prepare a customized quotation within 2 business days.")}
                       >
-                        💰 Quotation
+                        Quotation
                       </button>
                       <button
                         type="button"
@@ -2920,7 +2979,7 @@ export default function ClientManagerDashboard() {
                         style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
                         onClick={() => setResponseText("We would be delighted to arrange a site inspection and showroom visit at your convenience. Please let us know your preferred date and time.")}
                       >
-                        🏡 Site Visit
+                        Site Visit
                       </button>
                     </div>
                   </div>
@@ -2951,8 +3010,8 @@ export default function ClientManagerDashboard() {
           <div className="light-modal-overlay">
             <div className="light-modal-box" style={{ maxWidth: '640px' }}>
               <div className="modal-head-row">
-                <h3 style={{ margin: 0, color: '#0f172a' }}>✉️ Send Inquiry to Client</h3>
-                <button type="button" onClick={() => setComposeInquiryOpen(false)}>✕</button>
+                <h3 style={{ margin: 0, color: '#0f172a' }}>Send Inquiry to Client</h3>
+                <button type="button" onClick={() => setComposeInquiryOpen(false)}>×</button>
               </div>
               <form onSubmit={handleSendComposeInquiry}>
                 <div className="modal-body-content">
@@ -2995,7 +3054,7 @@ export default function ClientManagerDashboard() {
                   </div>
 
                   <p style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.75rem', marginBottom: 0 }}>
-                    💡 The client will receive this inquiry in their Client Portal and can reply directly in the thread.
+                    The client will receive this inquiry in their Client Portal and can reply directly in the thread.
                   </p>
                 </div>
                 <div className="modal-actions-row">
@@ -3014,7 +3073,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box">
               <div className="modal-head-row">
                 <h3>Upload Document for Client</h3>
-                <button type="button" onClick={() => setDocModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setDocModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleUploadDoc}>
                 <div className="modal-body-content">
@@ -3071,7 +3130,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box" style={{ maxWidth: '640px' }}>
               <div className="modal-head-row">
                 <h3>{editingPayment ? 'Edit Payment Record' : 'Record Project Payment'}</h3>
-                <button type="button" onClick={() => setPaymentModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setPaymentModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleSavePayment}>
                 <div className="modal-body-content">
@@ -3245,7 +3304,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box" style={{ maxWidth: '540px' }}>
               <div className="modal-head-row">
                 <h3>Payment Receipt — {receiptPreviewModal.referenceNumber || `DP-${receiptPreviewModal.id}`}</h3>
-                <button type="button" onClick={() => setReceiptPreviewModal(null)}>✕</button>
+                <button type="button" onClick={() => setReceiptPreviewModal(null)}>×</button>
               </div>
               <div className="modal-body-content" style={{ textAlign: 'center' }}>
                 <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>
@@ -3300,7 +3359,7 @@ export default function ClientManagerDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>FORWARD TO ENGINEERING TEAM</span>
                   <h3 style={{ margin: '0.2rem 0 0' }}>Forward to Project Manager: {forwardTarget.title}</h3>
                 </div>
-                <button type="button" onClick={() => { setForwardModalOpen(false); setForwardTarget(null); }}>✕</button>
+                <button type="button" onClick={() => { setForwardModalOpen(false); setForwardTarget(null); }}>×</button>
               </div>
 
               <form onSubmit={handleSubmitForward} style={{ marginTop: '1.25rem' }}>
@@ -3309,7 +3368,7 @@ export default function ClientManagerDashboard() {
                   <p style={{ margin: '0 0 0.35rem' }}><strong>Category:</strong> {forwardTarget.category} &nbsp;|&nbsp; <strong>Location:</strong> {forwardTarget.location}</p>
                   <p style={{ margin: '0 0 0.35rem' }}><strong>Client Expected Budget:</strong> {forwardTarget.expectedBudget ? formatMoney(forwardTarget.expectedBudget) : 'N/A'}</p>
                   {forwardTarget.imageUrls && forwardTarget.imageUrls.length > 0 && (
-                    <p style={{ margin: 0, color: 'var(--brand-green)', fontWeight: 600 }}>📸 {forwardTarget.imageUrls.length} Photos/Drawings Attached</p>
+                    <p style={{ margin: 0, color: 'var(--brand-green)', fontWeight: 600 }}>{forwardTarget.imageUrls.length} Photos/Drawings Attached</p>
                   )}
                 </div>
 
@@ -3350,7 +3409,7 @@ export default function ClientManagerDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>CLIENT OFFICIAL PROPOSAL DISPATCH</span>
                   <h3 style={{ margin: '0.2rem 0 0' }}>Send Official Response to: {clientNotifyTarget.client?.name}</h3>
                 </div>
-                <button type="button" onClick={() => { setClientNotifyModalOpen(false); setClientNotifyTarget(null); }}>✕</button>
+                <button type="button" onClick={() => { setClientNotifyModalOpen(false); setClientNotifyTarget(null); }}>×</button>
               </div>
 
               <form onSubmit={handleSubmitClientNotify} style={{ marginTop: '1.25rem' }}>
@@ -3389,7 +3448,7 @@ export default function ClientManagerDashboard() {
                     Cancel
                   </button>
                   <button type="submit" className="btn-solid-green" disabled={submittingClientNotify}>
-                    {submittingClientNotify ? 'Dispatching Response...' : 'Send Response & Notify Client ✉️'}
+                    {submittingClientNotify ? 'Dispatching Response...' : 'Send Response & Notify Client'}
                   </button>
                 </div>
               </form>
@@ -3402,8 +3461,8 @@ export default function ClientManagerDashboard() {
           <div className="light-modal-overlay">
             <div className="light-modal-box" style={{ maxWidth: '520px' }}>
               <div className="modal-head-row">
-                <h3 style={{ color: '#166534' }}>✓ Approve Project Request</h3>
-                <button type="button" onClick={() => { setApproveModalOpen(false); setApproveTarget(null); }}>✕</button>
+                <h3 style={{ color: '#166534' }}>Approve Project Request</h3>
+                <button type="button" onClick={() => { setApproveModalOpen(false); setApproveTarget(null); }}>×</button>
               </div>
               <form onSubmit={handleConfirmApprove} style={{ marginTop: '1rem' }}>
                 <div className="modal-body-content">
@@ -3431,7 +3490,7 @@ export default function ClientManagerDashboard() {
                     Cancel
                   </button>
                   <button type="submit" className="btn-solid-green" disabled={submittingApprove} style={{ background: '#16a34a' }}>
-                    {submittingApprove ? 'Approving...' : '✓ Confirm Approval'}
+                    {submittingApprove ? 'Approving...' : 'Confirm Approval'}
                   </button>
                 </div>
               </form>
@@ -3444,8 +3503,8 @@ export default function ClientManagerDashboard() {
           <div className="light-modal-overlay">
             <div className="light-modal-box" style={{ maxWidth: '520px' }}>
               <div className="modal-head-row">
-                <h3 style={{ color: '#b91c1c' }}>✗ Reject Project Request</h3>
-                <button type="button" onClick={() => { setRejectModalOpen(false); setRejectTarget(null); }}>✕</button>
+                <h3 style={{ color: '#b91c1c' }}>Reject Project Request</h3>
+                <button type="button" onClick={() => { setRejectModalOpen(false); setRejectTarget(null); }}>×</button>
               </div>
               <form onSubmit={handleConfirmReject} style={{ marginTop: '1rem' }}>
                 <div className="modal-body-content">
@@ -3471,7 +3530,7 @@ export default function ClientManagerDashboard() {
                     Cancel
                   </button>
                   <button type="submit" className="btn-solid-green" disabled={submittingReject} style={{ background: '#dc2626' }}>
-                    {submittingReject ? 'Rejecting...' : '✗ Confirm Rejection'}
+                    {submittingReject ? 'Rejecting...' : 'Confirm Rejection'}
                   </button>
                 </div>
               </form>
@@ -3485,7 +3544,7 @@ export default function ClientManagerDashboard() {
             <div className="light-modal-box" style={{ maxWidth: '750px' }}>
               <div className="modal-head-row">
                 <h3>Photos / Drawings — {previewRequestPhotosModal.title}</h3>
-                <button type="button" onClick={() => setPreviewRequestPhotosModal(null)}>✕</button>
+                <button type="button" onClick={() => setPreviewRequestPhotosModal(null)}>×</button>
               </div>
               <div className="modal-body-content" style={{ marginTop: '1rem' }}>
                 <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>
@@ -3515,7 +3574,7 @@ export default function ClientManagerDashboard() {
                   <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>PAYMENT SETTINGS</span>
                   <h3 style={{ margin: '0.2rem 0 0' }}>Edit Company Bank Details</h3>
                 </div>
-                <button type="button" onClick={() => setBankDetailsModalOpen(false)}>✕</button>
+                <button type="button" onClick={() => setBankDetailsModalOpen(false)}>×</button>
               </div>
               <form onSubmit={handleSaveBankDetails}>
                 <div className="modal-body-content">

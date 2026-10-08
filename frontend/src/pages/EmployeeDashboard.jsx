@@ -10,15 +10,15 @@ import {
   getMyEmployeeProfile,
   getTasks,
   updateTaskProgress,
-  recordAttendance,
   updateEmployeeProfile,
   getMaterials,
   getMaterialRequests,
   createMaterialRequest,
   getProjects,
 } from '../services/api';
+import { downloadFile, exportCsv } from '../utils/documentDownload';
 
-//roles
+// Roles list for profile editing
 const ROLES_LIST = [
   'Site Engineer',
   'Civil Engineer',
@@ -33,7 +33,8 @@ const ROLES_LIST = [
   'Site Supervisor',
   'General Staff',
 ];
-//departments show in employee
+
+// Departments in company
 const DEPARTMENTS = [
   'Engineering',
   'Electrical & Utilities',
@@ -43,15 +44,8 @@ const DEPARTMENTS = [
   'Site Safety & Quality',
   'Operations & Logistics',
 ];
-//getting today's date
-const getTodayDateString = () => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-//EmployeeDashboard Component
+
+// EmployeeDashboard Component
 export default function EmployeeDashboard() {
   const { user, updateUser } = useAuth();
   const [profile, setProfile] = useState(null);
@@ -61,20 +55,6 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('projects');
-
-  const todayStr = getTodayDateString();
-
-  // Self Attendance Form (Restricted to Today only)
-  const [attendanceForm, setAttendanceForm] = useState({
-    date: todayStr,
-    status: 'PRESENT',
-    checkInTime: '08:00',
-    checkOutTime: '17:00',
-    remarks: 'Unavailable',
-  });
-  const [markingAttendance, setMarkingAttendance] = useState(false);
-  const [attendanceNotice, setAttendanceNotice] = useState('');
-  const [attendanceError, setAttendanceError] = useState('');
 
   // Profile Edit State
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -101,7 +81,7 @@ export default function EmployeeDashboard() {
   const [savingTaskProgress, setSavingTaskProgress] = useState(false);
   const [taskNotice, setTaskNotice] = useState('');
 
-  // Material Request State (Site Engineer Material Requisition)
+  // Material Requests (Exclusive to Site Engineer role)
   const [materials, setMaterials] = useState([]);
   const [materialRequests, setMaterialRequests] = useState([]);
   const [allProjects, setAllProjects] = useState([]);
@@ -116,29 +96,38 @@ export default function EmployeeDashboard() {
   const [materialReqNotice, setMaterialReqNotice] = useState('');
   const [materialReqError, setMaterialReqError] = useState('');
 
+  // Check if current employee is a Site Engineer
+  const roleName = (profile?.role || profile?.position || '').toLowerCase();
+  const isSiteEngineer = roleName.includes('site engineer') || roleName.includes('site_engineer');
+
   const loadEmployeeData = async () => {
     if (!user) return;
     try {
       setLoading(true);
       const username = user.username;
-      const [empProfile, assignedProjs, matsData, reqsData, allProjsData] = await Promise.all([
+      const [empProfile, assignedProjs, allProjsData, matsData, reqsData] = await Promise.all([
         getMyEmployeeProfile(username).catch(() => null),
         getMyAssignedProjects(username).catch(() => []),
+        getProjects({ realOnly: true }).catch(() => []),
         getMaterials().catch(() => []),
         getMaterialRequests().catch(() => []),
-        getProjects({ realOnly: true }).catch(() => []),
       ]);
 
       setProfile(empProfile);
       setProjects(assignedProjs || []);
+      setAllProjects(allProjsData || []);
       setMaterials(matsData || []);
       setMaterialRequests(reqsData || []);
-      setAllProjects(allProjsData || []);
 
-      if (assignedProjs && assignedProjs.length > 0 && !materialRequestForm.projectId) {
+      if (assignedProjs && assignedProjs.length > 0) {
         setMaterialRequestForm((prev) => ({
           ...prev,
-          projectId: String(assignedProjs[0].id),
+          projectId: prev.projectId || String(assignedProjs[0].id),
+        }));
+      } else if (allProjsData && allProjsData.length > 0) {
+        setMaterialRequestForm((prev) => ({
+          ...prev,
+          projectId: prev.projectId || String(allProjsData[0].id),
         }));
       }
 
@@ -157,7 +146,11 @@ export default function EmployeeDashboard() {
     }
   };
 
-  //Creating a Material Request
+  useEffect(() => {
+    loadEmployeeData();
+  }, [user]);
+
+  // Handle Material Request submission (Site Engineer only)
   const handleCreateMaterialRequest = async (e) => {
     e.preventDefault();
     if (!materialRequestForm.projectId || !materialRequestForm.materialId || !materialRequestForm.requestedQuantity) {
@@ -169,7 +162,7 @@ export default function EmployeeDashboard() {
     setMaterialReqError('');
 
     try {
-      const requesterTitle = `${profile?.name || user?.displayName || user?.username} (${profile?.role || profile?.position || 'Site Engineer'})`;
+      const requesterTitle = `${profile?.name || user?.displayName || user?.username} (Site Engineer)`;
       await createMaterialRequest({
         projectId: Number(materialRequestForm.projectId),
         materialId: Number(materialRequestForm.materialId),
@@ -181,7 +174,7 @@ export default function EmployeeDashboard() {
         requestedBy: requesterTitle,
       });
 
-      setMaterialReqNotice('✓ Material request submitted successfully! Inventory Manager will review and issue stock.');
+      setMaterialReqNotice('Material request submitted successfully! Inventory Manager will review and issue stock.');
       setMaterialRequestForm((prev) => ({
         ...prev,
         materialId: '',
@@ -196,54 +189,6 @@ export default function EmployeeDashboard() {
       setMaterialReqError(err.message || 'Failed to submit material request.');
     } finally {
       setSubmittingMaterialReq(false);
-    }
-  };
-
-  useEffect(() => {
-    loadEmployeeData();
-  }, [user]);
-
-  //Marking Attendance
-  const handleMarkAttendance = async (e) => {
-    e.preventDefault();
-    if (!profile?.id) return;
-
-    const currentToday = getTodayDateString();
-    if (attendanceForm.date !== currentToday) {
-      setAttendanceError('Attendance can only be marked for today. Previous and upcoming days attendance cannot be marked.');
-      return;
-    }
-
-    const existing = attendance.find((a) => a.date === currentToday);
-    if (existing) {
-      setAttendanceError(`Attendance for today (${formatDate(currentToday)}) is already marked as ${existing.status}. Attendance can only be marked once and cannot be changed.`);
-      return;
-    }
-    setMarkingAttendance(true);
-    setAttendanceNotice('');
-    setAttendanceError('');
-
-    const finalRemarks = attendanceForm.status === 'PRESENT' ? 'Unavailable' : (attendanceForm.remarks.trim() || 'Recorded from Employee Portal');
-
-    try {
-      await recordAttendance({
-        employeeId: profile.id,
-        date: currentToday,
-        status: attendanceForm.status,
-        checkInTime: attendanceForm.status === 'ABSENT' ? null : attendanceForm.checkInTime,
-        checkOutTime: attendanceForm.status === 'ABSENT' ? null : attendanceForm.checkOutTime,
-        remarks: finalRemarks,
-        recordedBy: `Self (${profile.name || user?.username})`,
-      });
-
-      setAttendanceNotice(`✓ Attendance for today (${currentToday}) successfully recorded!`);
-      const updatedAtt = await getEmployeeAttendanceHistory(profile.id);
-      setAttendance(updatedAtt || []);
-      setTimeout(() => setAttendanceNotice(''), 4000);
-    } catch (err) {
-      setAttendanceError(err.message || 'Failed to record attendance.');
-    } finally {
-      setMarkingAttendance(false);
     }
   };
 
@@ -269,7 +214,7 @@ export default function EmployeeDashboard() {
     setProfileError('');
   };
 
-  //Saving Profile
+  // Saving Profile
   const handleSaveProfile = async (e) => {
     if (e) e.preventDefault();
     if (!profile?.id) return;
@@ -323,7 +268,7 @@ export default function EmployeeDashboard() {
           username: prev?.username === profile.email ? updated.email : prev?.username,
         }));
       }
-      setProfileNotice('✓ Profile updated and saved successfully!');
+      setProfileNotice('Profile updated and saved successfully!');
       setIsEditingProfile(false);
       setTimeout(() => setProfileNotice(''), 4000);
     } catch (err) {
@@ -352,7 +297,7 @@ export default function EmployeeDashboard() {
         status: taskProgressPayload.status,
         progressRemarks: taskProgressPayload.progressRemarks.trim(),
       });
-      setTaskNotice(`✓ Task progress updated successfully! Project Manager notified.`);
+      setTaskNotice('Task progress updated successfully! Project Manager notified.');
       setUpdatingTaskId(null);
       if (profile?.id) {
         const empTasks = await getTasks(null, profile.id);
@@ -367,17 +312,18 @@ export default function EmployeeDashboard() {
   };
 
   const presentCount = attendance.filter((a) => a.status === 'PRESENT').length;
+  const absentCount = attendance.filter((a) => a.status === 'ABSENT').length;
   const attendanceRate =
     attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 100;
 
-  const availableProjects = allProjects.length > 0 ? allProjects : projects;
+  const availableProjects = projects.length > 0 ? projects : allProjects;
   const assignedProjectIds = new Set(projects.map((p) => p.id));
   const myMaterialRequests = materialRequests.filter((r) => {
     if (!r) return false;
     const requestedBy = (r.requestedBy || '').toLowerCase();
     const username = (user?.username || '').toLowerCase();
     const displayName = (profile?.name || user?.displayName || '').toLowerCase();
-    const isMe = (username && requestedBy.includes(username)) || (displayName && requestedBy.includes(displayName)) || requestedBy.includes('site engineer') || requestedBy.includes('site manager');
+    const isMe = (username && requestedBy.includes(username)) || (displayName && requestedBy.includes(displayName)) || requestedBy.includes('site engineer');
     const isMyProject = r.project?.id && assignedProjectIds.has(r.project.id);
     return isMe || isMyProject;
   });
@@ -412,7 +358,7 @@ export default function EmployeeDashboard() {
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ background: 'rgba(255,255,255,0.15)', padding: '12px 20px', borderRadius: '12px', textAlign: 'center' }}>
                 <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Assigned Projects</div>
                 <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{projects.length}</div>
@@ -421,9 +367,15 @@ export default function EmployeeDashboard() {
                 <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Assigned Tasks</div>
                 <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{tasks.length}</div>
               </div>
+              {isSiteEngineer && (
+                <div style={{ background: 'rgba(255,255,255,0.15)', padding: '12px 20px', borderRadius: '12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Material Requests</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{myMaterialRequests.length}</div>
+                </div>
+              )}
               <div style={{ background: 'rgba(255,255,255,0.15)', padding: '12px 20px', borderRadius: '12px', textAlign: 'center' }}>
-                <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Material Requests</div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{myMaterialRequests.length}</div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.85, textTransform: 'uppercase', fontWeight: 600 }}>Attendance Records</div>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800 }}>{attendance.length}</div>
               </div>
             </div>
           </div>
@@ -444,7 +396,7 @@ export default function EmployeeDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            🏢 My Projects ({projects.length})
+            My Projects ({projects.length})
           </button>
           <button
             onClick={() => setActiveTab('tasks')}
@@ -459,23 +411,28 @@ export default function EmployeeDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            📋 My Tasks &amp; Progress Updates ({tasks.length})
+            My Tasks & Progress Updates ({tasks.length})
           </button>
-          <button
-            onClick={() => setActiveTab('materials')}
-            style={{
-              padding: '10px 20px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeTab === 'materials' ? '#047857' : '#f3f4f6',
-              color: activeTab === 'materials' ? '#ffffff' : '#374151',
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontSize: '0.95rem',
-            }}
-          >
-            📦 Request Site Materials ({myMaterialRequests.length})
-          </button>
+
+          {/* Request Material Tab: ONLY visible and available for Site Engineer role */}
+          {isSiteEngineer && (
+            <button
+              onClick={() => setActiveTab('materials')}
+              style={{
+                padding: '10px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                background: activeTab === 'materials' ? '#047857' : '#f3f4f6',
+                color: activeTab === 'materials' ? '#ffffff' : '#374151',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '0.95rem',
+              }}
+            >
+              Request Site Materials ({myMaterialRequests.length})
+            </button>
+          )}
+
           <button
             onClick={() => setActiveTab('attendance')}
             style={{
@@ -489,7 +446,7 @@ export default function EmployeeDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            ⏱️ Attendance &amp; Self Check-in ({attendance.length})
+            Attendance Log ({attendance.length})
           </button>
           <button
             onClick={() => setActiveTab('profile')}
@@ -504,13 +461,28 @@ export default function EmployeeDashboard() {
               fontSize: '0.95rem',
             }}
           >
-            👤 My Profile &amp; Qualifications
+            My Profile & Qualifications
+          </button>
+          <button
+            onClick={() => setActiveTab('documents')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: activeTab === 'documents' ? '#047857' : '#f3f4f6',
+              color: activeTab === 'documents' ? '#ffffff' : '#374151',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontSize: '0.95rem',
+            }}
+          >
+            Documents Vault
           </button>
         </div>
 
         {error && (
           <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
-            ⚠️ {error}
+            {error}
           </div>
         )}
 
@@ -519,7 +491,7 @@ export default function EmployeeDashboard() {
           <div>
             <div style={{ marginBottom: '16px' }}>
               <h2 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.4rem' }}>
-                🏗️ Construction Projects Assigned to You
+                Construction Projects Assigned to You
               </h2>
               <p style={{ color: '#6b7280', margin: 0, fontSize: '0.9rem' }}>
                 View current project milestones, timelines, locations, and site progress.
@@ -530,7 +502,7 @@ export default function EmployeeDashboard() {
               <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading projects...</div>
             ) : projects.length === 0 ? (
               <div style={{ background: '#ffffff', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', border: '1px solid #e5e7eb' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🏗️</div>
+                
                 <h3 style={{ color: '#111827', margin: '0 0 8px' }}>No Projects Assigned Yet</h3>
                 <p style={{ color: '#6b7280', maxWidth: '450px', margin: '0 auto' }}>
                   You have not been assigned to any active construction projects yet. Please check with your Employee Manager.
@@ -611,16 +583,16 @@ export default function EmployeeDashboard() {
                       {/* Key details */}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#f9fafb', padding: '12px', borderRadius: '8px', fontSize: '0.8rem', color: '#4b5563', marginBottom: '16px' }}>
                         <div>
-                          <strong>📍 Location:</strong> {proj.location || 'Colombo, Sri Lanka'}
+                          <strong>Location:</strong> {proj.location || 'Colombo, Sri Lanka'}
                         </div>
                         <div>
-                          <strong>📅 Timeline:</strong> {formatDate(proj.startDate)}
+                          <strong>Timeline:</strong> {formatDate(proj.startDate)}
                         </div>
                         <div>
-                          <strong>👤 Client:</strong> {proj.client?.name || 'Odiliya In-House'}
+                          <strong>Client:</strong> {proj.client?.name || 'Odiliya In-House'}
                         </div>
                         <div>
-                          <strong>💰 Budget:</strong> {formatMoney(proj.budget)}
+                          <strong>Budget:</strong> {formatMoney(proj.budget)}
                         </div>
                       </div>
 
@@ -628,7 +600,7 @@ export default function EmployeeDashboard() {
                       {proj.milestones && proj.milestones.length > 0 && (
                         <div>
                           <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#374151', marginBottom: '6px' }}>
-                            🎯 Project Milestones:
+                            Project Milestones:
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {proj.milestones.slice(0, 3).map((m) => (
@@ -644,7 +616,7 @@ export default function EmployeeDashboard() {
 
                     <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end' }}>
                       <span style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 600 }}>
-                        Active Site Assignment ✓
+                        Active Site Assignment (Active)
                       </span>
                     </div>
                   </div>
@@ -654,12 +626,12 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
-        {/* TAB 2: MY TASKS & PROGRESS UPDATES (Req 4) */}
+        {/* TAB 2: MY TASKS & PROGRESS UPDATES */}
         {activeTab === 'tasks' && (
           <div>
             <div style={{ marginBottom: '16px' }}>
               <h2 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.4rem' }}>
-                📋 Your Assigned Tasks &amp; Progress Updates
+                Your Assigned Tasks & Progress Updates
               </h2>
               <p style={{ color: '#6b7280', margin: 0, fontSize: '0.9rem' }}>
                 Update your task completion percentage, status, and site remarks so the Project Manager can monitor site progress.
@@ -674,7 +646,7 @@ export default function EmployeeDashboard() {
 
             {tasks.length === 0 ? (
               <div style={{ background: '#ffffff', borderRadius: '12px', padding: '48px 24px', textAlign: 'center', border: '1px solid #e5e7eb' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '12px' }}>📋</div>
+                
                 <h3 style={{ color: '#111827', margin: '0 0 8px' }}>No Tasks Assigned Yet</h3>
                 <p style={{ color: '#6b7280', maxWidth: '450px', margin: '0 auto' }}>
                   You currently have no tasks assigned by the Project Manager. Check back once your site supervisor assigns daily tasks.
@@ -737,8 +709,8 @@ export default function EmployeeDashboard() {
                         </p>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.8rem', color: '#6b7280', marginBottom: '14px', background: '#f9fafb', padding: '8px 12px', borderRadius: '6px' }}>
-                          <div>📅 Start: <b>{formatDate(task.startDate)}</b></div>
-                          <div>⏳ Deadline: <b>{formatDate(task.deadline)}</b></div>
+                          <div>Start Date: <b>{formatDate(task.startDate)}</b></div>
+                          <div>Deadline: <b>{formatDate(task.deadline)}</b></div>
                         </div>
 
                         {/* Current Progress bar */}
@@ -761,7 +733,7 @@ export default function EmployeeDashboard() {
 
                         {task.progressRemarks && !isEditing && (
                           <div style={{ fontSize: '0.8rem', color: '#374151', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '8px 12px', borderRadius: '6px', marginBottom: '12px' }}>
-                            <strong>💬 Latest Update:</strong> {task.progressRemarks}
+                            <strong>Latest Update:</strong> {task.progressRemarks}
                           </div>
                         )}
 
@@ -865,7 +837,7 @@ export default function EmployeeDashboard() {
                               fontSize: '0.85rem',
                             }}
                           >
-                            ✏️ Update Task Progress
+                            Update Task Progress
                           </button>
                         )}
                       </div>
@@ -877,194 +849,284 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
-        {/* TAB 3: MY ATTENDANCE LOG & SELF CHECK-IN (Req 3) */}
+        {/* TAB 3: SITE MATERIAL REQUESTS (EXCLUSIVE TO SITE ENGINEER) */}
+        {activeTab === 'materials' && isSiteEngineer && (
+          <div>
+            <div style={{ marginBottom: '16px' }}>
+              <h2 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.4rem' }}>
+                Site Material Requisitions
+              </h2>
+              <p style={{ color: '#6b7280', margin: 0, fontSize: '0.9rem' }}>
+                As a Site Engineer, request raw materials, aggregates, steel, cement, and equipment from the central warehouse.
+              </p>
+            </div>
+
+            {materialReqNotice && (
+              <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0' }}>
+                {materialReqNotice}
+              </div>
+            )}
+            {materialReqError && (
+              <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
+                {materialReqError}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px', alignItems: 'start' }}>
+              {/* Form Card */}
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Request Materials for Site
+                </h3>
+                <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
+                  Fill out the requisition form below. Requests are routed directly to the Inventory Manager for approval and dispatch.
+                </p>
+
+                <form onSubmit={handleCreateMaterialRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                      Target Construction Project *
+                    </label>
+                    <select
+                      value={materialRequestForm.projectId}
+                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, projectId: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                    >
+                      <option value="">-- Choose Project --</option>
+                      {availableProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.location ? `(${p.location})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                      Material Required *
+                    </label>
+                    <select
+                      value={materialRequestForm.materialId}
+                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, materialId: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                    >
+                      <option value="">-- Choose Material from Inventory --</option>
+                      {materials.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.materialCode ? `[${m.materialCode}] ` : ''}{m.name} (In Stock: {m.quantity} {m.unit || 'units'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                        Requested Quantity *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.1"
+                        placeholder="e.g. 50"
+                        value={materialRequestForm.requestedQuantity}
+                        onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, requestedQuantity: e.target.value })}
+                        required
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                        Required By Date
+                      </label>
+                      <input
+                        type="date"
+                        value={materialRequestForm.requiredDate}
+                        onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, requiredDate: e.target.value })}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
+                      Site Purpose &amp; Remarks
+                    </label>
+                    <textarea
+                      placeholder="E.g. Required for foundation casting, second floor slab beam reinforcement..."
+                      value={materialRequestForm.remarks}
+                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, remarks: e.target.value })}
+                      rows={3}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submittingMaterialReq}
+                    style={{
+                      padding: '12px 20px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: submittingMaterialReq ? 'not-allowed' : 'pointer',
+                      fontSize: '0.95rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 2px 4px rgba(4, 120, 87, 0.2)',
+                    }}
+                  >
+                    {submittingMaterialReq ? 'Submitting Request...' : 'Submit Material Requisition'}
+                  </button>
+                </form>
+              </div>
+
+              {/* History Card */}
+              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem' }}>
+                  Requisitions & Inventory Status
+                </h3>
+                <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
+                  Live tracking of requests submitted by site engineering staff.
+                </p>
+
+                {myMaterialRequests.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
+                    
+                    <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>No Material Requests Yet</div>
+                    <div style={{ fontSize: '0.85rem' }}>Use the requisition form to request materials for active site tasks.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '560px', overflowY: 'auto' }}>
+                    {myMaterialRequests
+                      .sort((a, b) => new Date(b.requestDate || b.createdAt || 0) - new Date(a.requestDate || a.createdAt || 0))
+                      .map((req) => {
+                        const statusColor = req.status === 'APPROVED'
+                          ? { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }
+                          : req.status === 'ISSUED'
+                          ? { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }
+                          : req.status === 'REJECTED'
+                          ? { bg: '#fee2e2', text: '#991b1b', border: '#fecaca' }
+                          : { bg: '#fef3c7', text: '#92400e', border: '#fde68a' };
+
+                        return (
+                          <div
+                            key={req.id}
+                            style={{
+                              padding: '14px 16px',
+                              borderRadius: '10px',
+                              border: `1px solid ${statusColor.border}`,
+                              background: '#ffffff',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                              <div>
+                                <span style={{ fontWeight: 700, color: '#111827', fontSize: '0.95rem' }}>
+                                  {req.material?.name || 'Material'}
+                                </span>
+                                {req.material?.materialCode && (
+                                  <span style={{ marginLeft: '6px', fontSize: '0.75rem', color: '#6b7280', background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>
+                                    {req.material?.materialCode}
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                style={{
+                                  padding: '3px 10px',
+                                  borderRadius: '12px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  background: statusColor.bg,
+                                  color: statusColor.text,
+                                }}
+                              >
+                                {req.status === 'PENDING' ? 'Awaiting Review' : req.status === 'APPROVED' ? 'Approved' : req.status === 'ISSUED' ? 'Stock Issued' : 'Rejected'}
+                              </span>
+                            </div>
+
+                            <div style={{ fontSize: '0.85rem', color: '#4b5563', marginBottom: '6px' }}>
+                              <b>Project:</b> {req.project?.name || 'Assigned Site'} | <b>Qty:</b> {req.requestedQuantity || req.quantity} {req.material?.unit || 'units'}
+                              {req.issuedQuantity > 0 && (
+                                <span style={{ marginLeft: '8px', color: '#059669', fontWeight: 600 }}>
+                                  (Issued: {req.issuedQuantity} {req.material?.unit || 'units'})
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ fontSize: '0.75rem', color: '#6b7280', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+                              <span>Requested: {formatDate(req.requestDate || req.createdAt)}</span>
+                              {req.requiredDate && <span>Needed by: {formatDate(req.requiredDate)}</span>}
+                            </div>
+
+                            {req.remarks && (
+                              <div style={{ marginTop: '6px', fontSize: '0.8rem', color: '#4b5563', background: '#f9fafb', padding: '6px 10px', borderRadius: '6px' }}>
+                                <i>Remarks: {req.remarks}</i>
+                              </div>
+                            )}
+
+                            {req.approvedBy && (
+                              <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#6b7280' }}>
+                                Reviewer: <b>{req.approvedBy}</b> {req.approvalDate ? `on ${formatDate(req.approvalDate)}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: MY ATTENDANCE LOG (VIEW ONLY) */}
         {activeTab === 'attendance' && (
           <div>
-            {/* Self-Attendance Form */}
-            <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '24px' }}>
-              <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.3rem' }}>
-                ⏱️ Mark Today's Attendance (Self Check-in)
-              </h3>
-              <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
-                Submit your daily check-in / check-out time and site notes. Your recorded attendance will be visible immediately to the Employee Manager.
-              </p>
+            {/* Info Header Box */}
+            <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.3rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    My Attendance Log & Work Records
+                  </h3>
+                  <p style={{ color: '#6b7280', margin: 0, fontSize: '0.88rem' }}>
+                    Your official attendance history and check-in / check-out times recorded by the Employee Manager.
+                  </p>
+                </div>
 
-              {(() => {
-                const existingAtt = attendance.find((a) => a.date === attendanceForm.date);
-                const isMarked = !!existingAtt;
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ padding: '6px 14px', borderRadius: '20px', background: '#ecfdf5', color: '#065f46', fontSize: '0.85rem', fontWeight: 600, border: '1px solid #a7f3d0' }}>
+                    Present: {presentCount}
+                  </span>
+                  <span style={{ padding: '6px 14px', borderRadius: '20px', background: '#fef2f2', color: '#991b1b', fontSize: '0.85rem', fontWeight: 600, border: '1px solid #fecaca' }}>
+                    Absent: {absentCount}
+                  </span>
+                  <span style={{ padding: '6px 14px', borderRadius: '20px', background: '#eff6ff', color: '#1d4ed8', fontSize: '0.85rem', fontWeight: 600, border: '1px solid #bfdbfe' }}>
+                    Attendance Rate: {attendanceRate}%
+                  </span>
+                </div>
+              </div>
 
-                return (
-                  <>
-                    {isMarked && (
-                      <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0', fontSize: '0.88rem' }}>
-                        🔒 <b>Attendance for {formatDate(attendanceForm.date)} is already marked as {existingAtt.status}</b> {existingAtt.checkInTime ? `(In: ${existingAtt.checkInTime} | Out: ${existingAtt.checkOutTime || '—'})` : ''}. In attendance, records can only be marked once and cannot be changed after done.
-                      </div>
-                    )}
-
-                    {attendanceNotice && (
-                      <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0' }}>
-                        {attendanceNotice}
-                      </div>
-                    )}
-                    {attendanceError && (
-                      <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
-                        ⚠️ {attendanceError}
-                      </div>
-                    )}
-
-                    <form onSubmit={handleMarkAttendance} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                          Attendance Date <span style={{ fontSize: '0.75rem', color: '#047857', fontWeight: 700 }}>(Today Only)</span>
-                        </label>
-                        <input
-                          type="date"
-                          value={todayStr}
-                          readOnly
-                          disabled
-                          min={todayStr}
-                          max={todayStr}
-                          title="Attendance can only be marked for today. Previous and upcoming dates cannot be marked."
-                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#f3f4f6', cursor: 'not-allowed', color: '#374151', fontWeight: 600 }}
-                        />
-                        <span style={{ fontSize: '0.7rem', color: '#6b7280', display: 'block', marginTop: '2px' }}>
-                          🔒 Only today's attendance can be marked
-                        </span>
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                          Status
-                        </label>
-                        <select
-                          value={isMarked ? existingAtt.status : attendanceForm.status}
-                          disabled={isMarked}
-                          onChange={(e) => {
-                            const newStatus = e.target.value;
-                            setAttendanceForm((prev) => ({
-                              ...prev,
-                              status: newStatus,
-                              remarks: newStatus === 'PRESENT' ? 'Unavailable' : (prev.remarks === 'Unavailable' ? '' : prev.remarks),
-                            }));
-                          }}
-                          style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
-                        >
-                          <option value="PRESENT">PRESENT (Full Day)</option>
-                          <option value="LATE">LATE (Delayed arrival)</option>
-                          <option value="HALF_DAY">HALF_DAY (4 Hours)</option>
-                          <option value="ON_LEAVE">ON_LEAVE (Approved leave)</option>
-                          <option value="ABSENT">ABSENT</option>
-                        </select>
-                      </div>
-
-                      {(!isMarked || (existingAtt && existingAtt.status !== 'ABSENT')) && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                            Check-in Time
-                          </label>
-                          <input
-                            type="time"
-                            value={isMarked ? (existingAtt.checkInTime || '') : attendanceForm.checkInTime}
-                            disabled={isMarked}
-                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkInTime: e.target.value })}
-                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
-                          />
-                        </div>
-                      )}
-
-                      {(!isMarked || (existingAtt && existingAtt.status !== 'ABSENT')) && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                            Check-out Time
-                          </label>
-                          <input
-                            type="time"
-                            value={isMarked ? (existingAtt.checkOutTime || '') : attendanceForm.checkOutTime}
-                            disabled={isMarked}
-                            onChange={(e) => setAttendanceForm({ ...attendanceForm, checkOutTime: e.target.value })}
-                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', background: isMarked ? '#f3f4f6' : '#fff', cursor: isMarked ? 'not-allowed' : 'default' }}
-                          />
-                        </div>
-                      )}
-
-                      <div style={{ gridColumn: 'span 2' }}>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                          Site Remarks / Notes
-                          {(isMarked ? existingAtt.status === 'PRESENT' : attendanceForm.status === 'PRESENT') && (
-                            <span style={{ marginLeft: '6px', fontSize: '0.72rem', color: '#6b7280', fontWeight: 500 }}>
-                              (Unavailable for Full Day Present)
-                            </span>
-                          )}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={(isMarked ? existingAtt.status === 'PRESENT' : attendanceForm.status === 'PRESENT') ? 'Unavailable' : 'E.g. On-site notes, inspection notes, delay reasons...'}
-                          value={isMarked ? (existingAtt.status === 'PRESENT' ? 'Unavailable' : (existingAtt.remarks || '')) : (attendanceForm.status === 'PRESENT' ? 'Unavailable' : attendanceForm.remarks)}
-                          disabled={isMarked || attendanceForm.status === 'PRESENT'}
-                          onChange={(e) => setAttendanceForm({ ...attendanceForm, remarks: e.target.value })}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '6px',
-                            border: '1px solid #d1d5db',
-                            background: (isMarked || attendanceForm.status === 'PRESENT') ? '#f3f4f6' : '#fff',
-                            color: (isMarked || attendanceForm.status === 'PRESENT') ? '#6b7280' : '#111827',
-                            cursor: (isMarked || attendanceForm.status === 'PRESENT') ? 'not-allowed' : 'default',
-                            fontStyle: (isMarked ? existingAtt.status === 'PRESENT' : attendanceForm.status === 'PRESENT') ? 'italic' : 'normal',
-                          }}
-                        />
-                        {attendanceForm.status === 'PRESENT' && !isMarked && (
-                          <span style={{ fontSize: '0.72rem', color: '#6b7280', display: 'block', marginTop: '3px' }}>
-                            ℹ️ Site remarks are unavailable when marked PRESENT (Full Day).
-                          </span>
-                        )}
-                      </div>
-
-                      <div>
-                        <button
-                          type="submit"
-                          disabled={markingAttendance || isMarked}
-                          style={{
-                            width: '100%',
-                            padding: '10px 16px',
-                            background: isMarked ? '#9ca3af' : '#047857',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '6px',
-                            fontWeight: 700,
-                            cursor: isMarked ? 'not-allowed' : 'pointer',
-                            fontSize: '0.9rem',
-                          }}
-                        >
-                          {isMarked ? '🔒 Marked & Finalized' : markingAttendance ? 'Submitting...' : '✓ Submit Attendance'}
-                        </button>
-                      </div>
-                    </form>
-                  </>
-                );
-              })()}
+              <div style={{ marginTop: '14px', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                
+                <span>Attendance is officially verified and recorded by the Employee Manager. Employees can view their complete attendance history below.</span>
+              </div>
             </div>
 
             {/* Attendance History Table */}
             <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                  <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.3rem' }}>
-                    📋 Recorded Attendance History
-                  </h3>
-                  <p style={{ color: '#6b7280', margin: 0, fontSize: '0.85rem' }}>
-                    Complete log of daily attendance and manager / self check-in records.
-                  </p>
-                </div>
-
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <span style={{ padding: '6px 12px', borderRadius: '20px', background: '#ecfdf5', color: '#065f46', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Present: {presentCount}
-                  </span>
-                  <span style={{ padding: '6px 12px', borderRadius: '20px', background: '#fef2f2', color: '#991b1b', fontSize: '0.85rem', fontWeight: 600 }}>
-                    Absent: {attendance.filter((a) => a.status === 'ABSENT').length}
-                  </span>
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h4 style={{ margin: 0, color: '#111827', fontSize: '1.1rem' }}>
+                  Recorded Attendance History ({attendance.length})
+                </h4>
               </div>
 
               <div style={{ overflowX: 'auto' }}>
@@ -1082,8 +1144,8 @@ export default function EmployeeDashboard() {
                   <tbody>
                     {attendance.length === 0 ? (
                       <tr>
-                        <td colSpan="6" style={{ textAlign: 'center', padding: '32px', color: '#6b7280' }}>
-                          No attendance records logged yet.
+                        <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#6b7280' }}>
+                          No attendance records logged yet. Records marked by your Employee Manager will appear here.
                         </td>
                       </tr>
                     ) : (
@@ -1148,40 +1210,16 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
-        {/* TAB 4: MY PROFILE */}
+        {/* TAB 5: MY PROFILE */}
         {activeTab === 'profile' && (
           <div style={{ maxWidth: '800px', margin: '0 auto', background: '#ffffff', borderRadius: '12px', padding: '28px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-              <div>
-                <h3 style={{ margin: 0, color: '#111827', fontSize: '1.3rem' }}>
-                  👤 Employee Identification &amp; Qualifications
-                </h3>
-                <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
-                  View and update your personal, role, and qualifications profile details.
-                </p>
-              </div>
-              {!isEditingProfile && (
-                <button
-                  type="button"
-                  onClick={startEditProfile}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: '#047857',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '9px 18px',
-                    fontWeight: 600,
-                    fontSize: '0.9rem',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(4, 120, 87, 0.2)',
-                  }}
-                >
-                  ✏️ Edit Profile
-                </button>
-              )}
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, color: '#111827', fontSize: '1.3rem' }}>
+                Employee Identification & Qualifications
+              </h3>
+              <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                View and update your personal, role, and qualifications profile details.
+              </p>
             </div>
 
             {profileNotice && (
@@ -1191,7 +1229,7 @@ export default function EmployeeDashboard() {
             )}
             {profileError && (
               <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca', fontSize: '0.9rem' }}>
-                ⚠️ {profileError}
+                {profileError}
               </div>
             )}
 
@@ -1289,7 +1327,7 @@ export default function EmployeeDashboard() {
                       cursor: 'pointer',
                     }}
                   >
-                    ✏️ Edit Profile Information
+                    Edit Profile Information
                   </button>
                 </div>
               </>
@@ -1452,7 +1490,7 @@ export default function EmployeeDashboard() {
                       boxShadow: '0 2px 4px rgba(4, 120, 87, 0.25)',
                     }}
                   >
-                    {savingProfile ? 'Saving Profile...' : '💾 Save Profile'}
+                    {savingProfile ? 'Saving Profile...' : 'Save Profile'}
                   </button>
                 </div>
               </form>
@@ -1460,239 +1498,183 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
-        {/* TAB 5: SITE MATERIAL REQUESTS (SITE ENGINEER PORTAL) */}
-        {activeTab === 'materials' && (
+        {/* TAB 6: DOCUMENTS & JOB CARDS VAULT */}
+        {activeTab === 'documents' && (
           <div>
-            <div style={{ marginBottom: '16px' }}>
-              <h2 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.4rem' }}>
-                📦 Site Material Requisitions
-              </h2>
-              <p style={{ color: '#6b7280', margin: 0, fontSize: '0.9rem' }}>
-                Request raw materials, aggregates, concrete, and equipment directly from central warehouse inventory for site operations.
-              </p>
-            </div>
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e5e7eb', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                <div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                    WORKFORCE DOCUMENTS &amp; SPECIFICATIONS
+                  </span>
+                  <h2 style={{ margin: '6px 0 2px', color: '#111827', fontSize: '1.4rem', fontWeight: 800 }}>
+                    My Work Documents & Job Cards
+                  </h2>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.88rem' }}>
+                    Download assigned task job cards, project engineering plans, safety guidelines, and personal attendance history.
+                  </p>
+                </div>
 
-            {materialReqNotice && (
-              <div style={{ background: '#ecfdf5', color: '#065f46', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #a7f3d0' }}>
-                {materialReqNotice}
-              </div>
-            )}
-            {materialReqError && (
-              <div style={{ background: '#fef2f2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #fecaca' }}>
-                ⚠️ {materialReqError}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '24px', alignItems: 'start' }}>
-              {/* Form Card */}
-              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  📝 Request Materials for Site
-                </h3>
-                <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
-                  Fill out the requisition form below. Requests are routed instantly to the Inventory Manager.
-                </p>
-
-                <form onSubmit={handleCreateMaterialRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                      Target Construction Project *
-                    </label>
-                    <select
-                      value={materialRequestForm.projectId}
-                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, projectId: e.target.value })}
-                      required
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
-                    >
-                      <option value="">-- Choose Project --</option>
-                      {availableProjects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} {p.location ? `(${p.location})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                      Material Required *
-                    </label>
-                    <select
-                      value={materialRequestForm.materialId}
-                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, materialId: e.target.value })}
-                      required
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
-                    >
-                      <option value="">-- Choose Material from Inventory --</option>
-                      {materials.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.materialCode ? `[${m.materialCode}] ` : ''}{m.name} (In Stock: {m.quantity} {m.unit || 'units'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                        Requested Quantity *
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0.1"
-                        placeholder="e.g. 50"
-                        value={materialRequestForm.requestedQuantity}
-                        onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, requestedQuantity: e.target.value })}
-                        required
-                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                        Required By Date
-                      </label>
-                      <input
-                        type="date"
-                        value={materialRequestForm.requiredDate}
-                        onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, requiredDate: e.target.value })}
-                        style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                      Site Purpose &amp; Remarks
-                    </label>
-                    <textarea
-                      placeholder="E.g. Required for foundation casting, second floor slab beam reinforcement..."
-                      value={materialRequestForm.remarks}
-                      onChange={(e) => setMaterialRequestForm({ ...materialRequestForm, remarks: e.target.value })}
-                      rows={3}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem', resize: 'vertical' }}
-                    />
-                  </div>
-
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
-                    type="submit"
-                    disabled={submittingMaterialReq}
+                    type="button"
+                    onClick={() => {
+                      exportCsv(
+                        attendance.map((a) => ({
+                          'Date': a.date,
+                          'Status': a.status,
+                          'Time In': a.checkInTime || '—',
+                          'Time Out': a.checkOutTime || '—',
+                          'Remarks': a.remarks || '—',
+                          'Recorded By': a.recordedBy || 'Manager',
+                        })),
+                        `Odiliya_My_Attendance_Records_${user?.username || 'Staff'}`
+                      );
+                    }}
                     style={{
-                      padding: '12px 20px',
+                      padding: '9px 16px',
                       background: '#047857',
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: '8px',
                       fontWeight: 700,
-                      cursor: submittingMaterialReq ? 'not-allowed' : 'pointer',
-                      fontSize: '0.95rem',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      boxShadow: '0 2px 4px rgba(4, 120, 87, 0.2)',
+                      gap: '6px',
                     }}
                   >
-                    {submittingMaterialReq ? 'Submitting Request...' : '📨 Submit Material Requisition'}
+                    Export My Attendance (CSV)
                   </button>
-                </form>
-              </div>
 
-              {/* History Card */}
-              <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <h3 style={{ margin: '0 0 6px', color: '#111827', fontSize: '1.2rem' }}>
-                  📋 Requisitions &amp; Inventory Status
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportCsv(
+                        tasks.map((t) => ({
+                          'Task ID': t.id,
+                          'Task Name': t.taskName,
+                          'Description': t.description || '—',
+                          'Project': t.project?.name || 'Assigned Project',
+                          'Deadline': t.deadline || '—',
+                          'Progress %': t.progressPercentage || 0,
+                          'Status': t.status,
+                          'My Progress Note': t.progressRemarks || '—',
+                        })),
+                        `Odiliya_My_Assigned_Tasks_${user?.username || 'Staff'}`
+                      );
+                    }}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#1d4ed8',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    Export My Tasks (CSV)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Document Cards Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+              {/* Card 1: Job Cards & Project Plans */}
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Job Assignment Cards & Drawings
                 </h3>
-                <p style={{ color: '#6b7280', margin: '0 0 16px', fontSize: '0.85rem' }}>
-                  Live tracking of requests submitted by site engineering staff.
+                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
+                  Official task work orders and architectural plans for your assigned construction sites.
                 </p>
 
-                {myMaterialRequests.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px', border: '1px dashed #d1d5db' }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📦</div>
-                    <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>No Material Requests Yet</div>
-                    <div style={{ fontSize: '0.85rem' }}>Use the requisition form to request materials for active site tasks.</div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '560px', overflowY: 'auto' }}>
-                    {myMaterialRequests
-                      .sort((a, b) => new Date(b.requestDate || b.createdAt || 0) - new Date(a.requestDate || a.createdAt || 0))
-                      .map((req) => {
-                        const statusColor = req.status === 'APPROVED'
-                          ? { bg: '#dbeafe', text: '#1e40af', border: '#bfdbfe' }
-                          : req.status === 'ISSUED'
-                          ? { bg: '#dcfce7', text: '#166534', border: '#bbf7d0' }
-                          : req.status === 'REJECTED'
-                          ? { bg: '#fee2e2', text: '#991b1b', border: '#fecaca' }
-                          : { bg: '#fef3c7', text: '#92400e', border: '#fde68a' };
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { name: 'Odiliya_Site_Work_Task_Job_Card.pdf', size: '280 KB', desc: 'Daily task milestone checklist and signature sign-off sheet' },
+                    { name: 'Odiliya_Assigned_Project_Engineering_Drawings.pdf', size: '3.6 MB', desc: 'Working site floor plan & structural specifications' },
+                    { name: 'Odiliya_Material_Requisition_and_Issue_Slip.pdf', size: '180 KB', desc: 'Site material collection slip for tool store' },
+                  ].map((doc) => (
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(null, doc.name)}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
-                        return (
-                          <div
-                            key={req.id}
-                            style={{
-                              padding: '14px 16px',
-                              borderRadius: '10px',
-                              border: `1px solid ${statusColor.border}`,
-                              background: '#ffffff',
-                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                              <div>
-                                <span style={{ fontWeight: 700, color: '#111827', fontSize: '0.95rem' }}>
-                                  {req.material?.name || 'Material'}
-                                </span>
-                                {req.material?.materialCode && (
-                                  <span style={{ marginLeft: '6px', fontSize: '0.75rem', color: '#6b7280', background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}>
-                                    {req.material?.materialCode}
-                                  </span>
-                                )}
-                              </div>
-                              <span
-                                style={{
-                                  padding: '3px 10px',
-                                  borderRadius: '12px',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  background: statusColor.bg,
-                                  color: statusColor.text,
-                                }}
-                              >
-                                {req.status === 'PENDING' ? '⏳ Awaiting Review' : req.status === 'APPROVED' ? '✓ Approved' : req.status === 'ISSUED' ? '📦 Stock Issued' : '✕ Rejected'}
-                              </span>
-                            </div>
+              {/* Card 2: Workplace Safety & Training Guides */}
+              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  Safety Manual & Trade Certification
+                </h3>
+                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
+                  Worker safety protocols, PPE usage guidelines, and NVQ trade advancement standards.
+                </p>
 
-                            <div style={{ fontSize: '0.85rem', color: '#4b5563', marginBottom: '6px' }}>
-                              🏗️ <b>Project:</b> {req.project?.name || 'Assigned Site'} | <b>Qty:</b> {req.requestedQuantity || req.quantity} {req.material?.unit || 'units'}
-                              {req.issuedQuantity > 0 && (
-                                <span style={{ marginLeft: '8px', color: '#059669', fontWeight: 600 }}>
-                                  (Issued: {req.issuedQuantity} {req.material?.unit || 'units'})
-                                </span>
-                              )}
-                            </div>
-
-                            <div style={{ fontSize: '0.75rem', color: '#6b7280', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
-                              <span>📅 Requested: {formatDate(req.requestDate || req.createdAt)}</span>
-                              {req.requiredDate && <span>🎯 Needed by: {formatDate(req.requiredDate)}</span>}
-                            </div>
-
-                            {req.remarks && (
-                              <div style={{ marginTop: '6px', fontSize: '0.8rem', color: '#4b5563', background: '#f9fafb', padding: '6px 10px', borderRadius: '6px' }}>
-                                💬 <i>{req.remarks}</i>
-                              </div>
-                            )}
-
-                            {req.approvedBy && (
-                              <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#6b7280' }}>
-                                Reviewer: <b>{req.approvedBy}</b> {req.approvalDate ? `on ${formatDate(req.approvalDate)}` : ''}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { name: 'Odiliya_Worker_Safety_and_PPE_Manual.pdf', size: '1.4 MB', desc: 'Mandatory PPE rules, emergency evacuation & first aid guidelines' },
+                    { name: 'Odiliya_Working_at_Heights_and_Scaffolding_Rules.pdf', size: '620 KB', desc: 'Harness anchoring, ladder safety & barrier standards' },
+                    { name: 'Odiliya_Trade_Skills_and_Standards_Guide.pdf', size: '380 KB', desc: 'NVQ certification standards for site engineering staff' },
+                  ].map((doc) => (
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1, marginRight: '10px' }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(null, doc.name)}
+                        style={{
+                          padding: '6px 12px',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

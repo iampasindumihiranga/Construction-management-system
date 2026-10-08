@@ -46,7 +46,7 @@ export default function PropertyExplorer({
             className={`pill-tab-item ${activeTab === 'RESIDENCIES' ? 'active' : ''}`}
             onClick={() => handleTabClick('RESIDENCIES')}
           >
-            <span className="tab-icon">🏠</span>
+            
             <span className="tab-text">Residencies</span>
             <span className="tab-pill-badge">{residenciesCount} Available</span>
           </button>
@@ -56,7 +56,7 @@ export default function PropertyExplorer({
             className={`pill-tab-item ${activeTab === 'LANDS' ? 'active' : ''}`}
             onClick={() => handleTabClick('LANDS')}
           >
-            <span className="tab-icon">🌲</span>
+            
             <span className="tab-text">Lands &amp; Plots</span>
             <span className="tab-pill-badge">{landsCount} Plots</span>
           </button>
@@ -66,7 +66,7 @@ export default function PropertyExplorer({
             className={`pill-tab-item ${activeTab === 'APARTMENTS' ? 'active' : ''}`}
             onClick={() => handleTabClick('APARTMENTS')}
           >
-            <span className="tab-icon">🏢</span>
+            
             <span className="tab-text">Apartments</span>
             <span className="tab-pill-badge">{apartmentsCount} Units</span>
           </button>
@@ -95,18 +95,18 @@ export default function PropertyExplorer({
                   />
                   <span className="media-tag-badge">{item.category}</span>
                   <span className="media-status-pill">
-                    {item.status ? (item.status === 'COMPLETED' ? '✓ Ready for Handover' : `${item.progressPercentage || 0}% Built`) : 'Available Design'}
+                    {item.status ? (item.status === 'COMPLETED' ? 'Ready for Handover' : `${item.progressPercentage || 0}% Built`) : 'Available Design'}
                   </span>
                 </div>
 
                 <div className="card-content-body">
-                  {item.location && <span className="card-location">📍 {item.location}</span>}
+                  {item.location && <span className="card-location">{item.location}</span>}
                   <h3 className="card-title">{item.name}</h3>
                   <p className="card-description">{item.description}</p>
 
                   {item.specifications && (
                     <div className="card-specs-chip">
-                      <span>✨</span>
+                      
                       <span>{item.specifications}</span>
                     </div>
                   )}
@@ -158,7 +158,7 @@ export default function PropertyExplorer({
             ))
           ) : (
             <div className="empty-results-box">
-              <span className="empty-icon">🏡</span>
+              
               <h3>No properties found in this category</h3>
               <p>Please select another property category above.</p>
             </div>

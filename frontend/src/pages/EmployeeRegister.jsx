@@ -228,7 +228,7 @@ export default function EmployeeRegister() {
 
           {message && (
             <div className="light-alert alert-success" style={{ marginBottom: '1.25rem' }}>
-              <span className="alert-icon">✅</span>
+              
               <div>
                 <div style={{ fontWeight: 700 }}>{message}</div>
                 <div style={{ fontSize: '0.85rem', marginTop: '4px' }}>Redirecting you to the Employee Portal sign-in...</div>
@@ -238,7 +238,7 @@ export default function EmployeeRegister() {
 
           {generalError && (
             <div className="light-alert alert-danger" style={{ marginBottom: '1.25rem' }}>
-              <span className="alert-icon">⚠️</span>
+              
               <span>{generalError}</span>
             </div>
           )}

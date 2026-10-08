@@ -109,6 +109,16 @@ public class EmployeeController {
     public ResponseEntity<EmployeeAttendance> recordAttendance(@Valid @RequestBody EmployeeAttendance attendance) {
         return ResponseEntity.status(HttpStatus.CREATED).body(employeeService.recordAttendance(attendance));
     }
+
+    @PutMapping("/attendance/{id}/checkout")
+    public ResponseEntity<EmployeeAttendance> recordCheckOut(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> payload
+    ) {
+        String checkOutTime = payload != null ? payload.get("checkOutTime") : null;
+        String remarks = payload != null ? payload.get("remarks") : null;
+        return ResponseEntity.ok(employeeService.recordCheckOut(id, checkOutTime, remarks));
+    }
     //Record Attendance
     @GetMapping("/attendance")
     public ResponseEntity<List<EmployeeAttendance>> getAttendance(

@@ -139,7 +139,7 @@ export default function LandingPage() {
           <div className="stats-strip-inner">
             <div className="stat-item-box">
               <div className="stat-icon-circle">
-                <span className="stat-large-icon">🏢</span>
+                
               </div>
               <div className="stat-text-col">
                 <strong className="stat-number">45+</strong>
@@ -149,7 +149,7 @@ export default function LandingPage() {
 
             <div className="stat-item-box">
               <div className="stat-icon-circle">
-                <span className="stat-large-icon">👥</span>
+                
               </div>
               <div className="stat-text-col">
                 <strong className="stat-number">6,500+</strong>
@@ -159,7 +159,7 @@ export default function LandingPage() {
 
             <div className="stat-item-box">
               <div className="stat-icon-circle">
-                <span className="stat-large-icon">📈</span>
+                
               </div>
               <div className="stat-text-col">
                 <strong className="stat-number">16%</strong>
@@ -169,7 +169,7 @@ export default function LandingPage() {
 
             <div className="stat-item-box">
               <div className="stat-icon-circle">
-                <span className="stat-large-icon">🛡️</span>
+                
               </div>
               <div className="stat-text-col">
                 <strong className="stat-number">22+</strong>
@@ -229,7 +229,7 @@ export default function LandingPage() {
                   padding: '4px 8px',
                 }}
               >
-                ✕
+                ×
               </button>
             </div>
 
@@ -327,12 +327,12 @@ export default function LandingPage() {
                 <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL INQUIRY TO CLIENT MANAGER</span>
                 <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Inquire: {inquiryTargetProject.name}</h3>
               </div>
-              <button type="button" onClick={() => { setInquiryModalOpen(false); setInquiryTargetProject(null); }}>✕</button>
+              <button type="button" onClick={() => { setInquiryModalOpen(false); setInquiryTargetProject(null); }}>×</button>
             </div>
 
             {inquirySuccessMsg && (
               <div className="pm-alert success" style={{ margin: '1rem 0' }}>
-                ✓ {inquirySuccessMsg}
+                {inquirySuccessMsg}
               </div>
             )}
             {inquiryErrorMsg && (
@@ -447,12 +447,12 @@ export default function LandingPage() {
 
               <div className="about-features-row">
                 <div className="feature-card">
-                  <span className="feature-icon">📜</span>
+                  
                   <h4>100% Clear Deeds</h4>
                   <p>Certified legal documentation and bank-approved titles.</p>
                 </div>
                 <div className="feature-card">
-                  <span className="feature-icon">🏗️</span>
+                  
                   <h4>Superior Engineering</h4>
                   <p>Highest structural integrity and modern architectural finishes.</p>
                 </div>

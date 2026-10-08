@@ -280,6 +280,10 @@ export const getEmployeeDashboardSummary = () => request('/api/employees/summary
 
 // Attendance Management (Step 5)
 export const recordAttendance = (attendance) => request('/api/employees/attendance', { method: 'POST', body: attendance });
+export const recordCheckOut = (id, payload) => request(`/api/employees/attendance/${id}/checkout`, {
+  method: 'PUT',
+  body: payload,
+});
 export const getAttendanceRecords = (params = {}) => {
   const query = new URLSearchParams();
   if (params.employeeId) query.set('employeeId', params.employeeId);
