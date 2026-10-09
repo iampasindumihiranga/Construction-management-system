@@ -77,6 +77,24 @@ public class ClientInquiry {
     @Column(length = 30)
     private String initiatedBy = "CLIENT";
 
+    @Column(length = 30)
+    private String pmDecision = "PENDING"; // PENDING, APPROVED, REJECTED
+
+    private LocalDateTime pmDecisionDate;
+
+    @Column(length = 2000)
+    private String pmDecisionRemarks;
+
+    @Column(precision = 19, scale = 2)
+    private java.math.BigDecimal pmEstimatedBudget;
+
+    @Column(length = 100)
+    private String pmEstimatedDuration;
+
+    private Boolean contractGenerated = false;
+
+    private Long contractId;
+
     @OneToMany(mappedBy = "inquiry", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @Fetch(FetchMode.SUBSELECT)
     @OrderBy("createdAt ASC, id ASC")
@@ -193,5 +211,61 @@ public class ClientInquiry {
 
     public void setRespondedBy(String respondedBy) {
         this.respondedBy = respondedBy;
+    }
+
+    public String getPmDecision() {
+        return pmDecision == null ? "PENDING" : pmDecision;
+    }
+
+    public void setPmDecision(String pmDecision) {
+        this.pmDecision = pmDecision;
+    }
+
+    public LocalDateTime getPmDecisionDate() {
+        return pmDecisionDate;
+    }
+
+    public void setPmDecisionDate(LocalDateTime pmDecisionDate) {
+        this.pmDecisionDate = pmDecisionDate;
+    }
+
+    public String getPmDecisionRemarks() {
+        return pmDecisionRemarks;
+    }
+
+    public void setPmDecisionRemarks(String pmDecisionRemarks) {
+        this.pmDecisionRemarks = pmDecisionRemarks;
+    }
+
+    public java.math.BigDecimal getPmEstimatedBudget() {
+        return pmEstimatedBudget;
+    }
+
+    public void setPmEstimatedBudget(java.math.BigDecimal pmEstimatedBudget) {
+        this.pmEstimatedBudget = pmEstimatedBudget;
+    }
+
+    public String getPmEstimatedDuration() {
+        return pmEstimatedDuration;
+    }
+
+    public void setPmEstimatedDuration(String pmEstimatedDuration) {
+        this.pmEstimatedDuration = pmEstimatedDuration;
+    }
+
+    public Boolean getContractGenerated() {
+        return contractGenerated != null && contractGenerated;
+    }
+
+    public void setContractGenerated(Boolean contractGenerated) {
+        this.contractGenerated = contractGenerated;
+    }
+
+    public Long getContractId() {
+        return contractId;
+    }
+
+    public void setContractId(Long contractId) {
+        this.contractId = contractId;
     }
 }

@@ -30,7 +30,15 @@ import {
   updateSupplier,
   deleteSupplier,
 } from '../services/api';
-import { downloadFile } from '../utils/documentDownload';
+import { downloadFile, exportCsv, exportExcel, downloadPurchaseOrderInvoice } from '../utils/documentDownload';
+
+const localDateString = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const DEFAULT_CATEGORIES = [
   'Building Materials',
@@ -57,12 +65,12 @@ const PAYMENT_TERMS_OPTIONS = [
 const emptyMaterial = {
   materialCode: '',
   name: '',
-  category: 'Building Materials',
+  category: '',
   quantity: '',
-  unit: 'bags',
+  unit: '',
   unitPrice: '',
   supplier: '',
-  minStockLevel: '10',
+  minStockLevel: '',
   location: '',
   description: '',
 };
@@ -74,14 +82,15 @@ const emptySupplier = {
   email: '',
   phone: '',
   address: '',
-  category: 'Building Materials',
+  category: '',
   suppliedItems: '',
-  paymentTerms: 'Net 30 Days',
-  status: 'ACTIVE',
+  paymentTerms: '',
+  status: '',
   notes: '',
 };
 
 export default function InventoryManagerDashboard() {
+  const today = localDateString();
   const [tab, setTab] = useState('overview');
   const [summary, setSummary] = useState({});
   const [materials, setMaterials] = useState([]);
@@ -105,6 +114,10 @@ export default function InventoryManagerDashboard() {
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [supplierForm, setSupplierForm] = useState(emptySupplier);
+  const [supplierErrors, setSupplierErrors] = useState({});
+  const [selectedInvoicePoId, setSelectedInvoicePoId] = useState('');
+  const [newGoodInput, setNewGoodInput] = useState('');
+  const [autoCreateMaterials, setAutoCreateMaterials] = useState(true);
 
   // Form states
   const [materialForm, setMaterialForm] = useState(emptyMaterial);
@@ -115,7 +128,7 @@ export default function InventoryManagerDashboard() {
     projectId: '',
     materialId: '',
     requestedQuantity: '',
-    requestedBy: 'Site Engineer',
+    requestedBy: '',
     remarks: '',
   });
 
@@ -445,6 +458,83 @@ export default function InventoryManagerDashboard() {
     });
   }, [suppliers, supplierSearch, supplierCategoryFilter, supplierStatusFilter]);
 
+  const validateSupplierField = (field, value) => {
+    let err = '';
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+
+    switch (field) {
+      case 'name':
+        if (!trimmed) {
+          err = 'Supplier / Company name is required.';
+        } else if (trimmed.length < 2) {
+          err = 'Company name must be at least 2 characters.';
+        } else if (/^[^a-zA-Z0-9]+$/.test(trimmed)) {
+          err = 'Company name must contain valid alphanumeric characters.';
+        }
+        break;
+
+      case 'contactPerson':
+        if (trimmed && trimmed.length < 2) {
+          err = 'Contact person name must be at least 2 characters.';
+        } else if (trimmed && !/^[a-zA-Z\s.'()-]+$/.test(trimmed)) {
+          err = 'Contact person name can only contain letters, spaces, dots, and hyphens.';
+        }
+        break;
+
+      case 'phone':
+        if (!trimmed) {
+          err = 'Phone number is required.';
+        } else if (!/^\+?[0-9\s()\-]{7,20}$/.test(trimmed)) {
+          err = 'Enter a valid phone number (e.g. +94 11 234 5678 or 0771234567).';
+        } else if ((trimmed.match(/\d/g) || []).length < 7) {
+          err = 'Phone number must contain at least 7 digits.';
+        }
+        break;
+
+      case 'email':
+        if (trimmed && !/^[A-Za-z0-9+_.-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})$/.test(trimmed)) {
+          err = 'Enter a valid email address (e.g. sales@tokyocement.lk).';
+        }
+        break;
+
+      case 'suppliedItems':
+        if (trimmed && trimmed.length < 2) {
+          err = 'Supplied goods description must be at least 2 characters.';
+        }
+        break;
+
+      case 'address':
+        if (trimmed && trimmed.length < 3) {
+          err = 'Address must be at least 3 characters.';
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    setSupplierErrors((prev) => ({ ...prev, [field]: err }));
+    return err;
+  };
+
+  const handleSupplierChange = (field, value) => {
+    setSupplierForm((prev) => ({ ...prev, [field]: value }));
+    validateSupplierField(field, value);
+  };
+
+  const validateAllSupplierForm = () => {
+    const errs = {
+      name: validateSupplierField('name', supplierForm.name),
+      phone: validateSupplierField('phone', supplierForm.phone),
+      contactPerson: validateSupplierField('contactPerson', supplierForm.contactPerson),
+      email: validateSupplierField('email', supplierForm.email),
+      suppliedItems: validateSupplierField('suppliedItems', supplierForm.suppliedItems),
+      address: validateSupplierField('address', supplierForm.address),
+    };
+    const hasError = Object.values(errs).some((e) => Boolean(e));
+    return !hasError;
+  };
+
   const openAddSupplierModal = async () => {
     try {
       const res = await getNextSupplierCode();
@@ -454,6 +544,9 @@ export default function InventoryManagerDashboard() {
     } catch {
       setSupplierForm(emptySupplier);
     }
+    setNewGoodInput('');
+    setAutoCreateMaterials(true);
+    setSupplierErrors({});
     setEditingSupplier(null);
     setSupplierModalOpen(true);
   };
@@ -473,22 +566,100 @@ export default function InventoryManagerDashboard() {
       status: sup.status || 'ACTIVE',
       notes: sup.notes || '',
     });
+    setNewGoodInput('');
+    setAutoCreateMaterials(false);
+    setSupplierErrors({});
     setSupplierModalOpen(true);
+  };
+
+  const handleAddSupplierGood = (goodName) => {
+    const trimmed = (goodName || '').trim();
+    if (!trimmed) return;
+    const currentList = (supplierForm.suppliedItems || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (!currentList.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+      const updated = [...currentList, trimmed];
+      const joined = updated.join(', ');
+      setSupplierForm((prev) => ({ ...prev, suppliedItems: joined }));
+      validateSupplierField('suppliedItems', joined);
+    }
+    setNewGoodInput('');
+  };
+
+  const handleRemoveSupplierGood = (indexToRemove) => {
+    const currentList = (supplierForm.suppliedItems || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const updated = currentList.filter((_, idx) => idx !== indexToRemove);
+    const joined = updated.join(', ');
+    setSupplierForm((prev) => ({ ...prev, suppliedItems: joined }));
+    validateSupplierField('suppliedItems', joined);
   };
 
   const saveSupplierSubmit = async (e) => {
     e.preventDefault();
+    // If user typed an item in input but forgot to click Add, add it before submitting
+    let finalSuppliedItems = supplierForm.suppliedItems || '';
+    if (newGoodInput.trim()) {
+      const currentList = finalSuppliedItems.split(',').map((s) => s.trim()).filter(Boolean);
+      if (!currentList.some((i) => i.toLowerCase() === newGoodInput.trim().toLowerCase())) {
+        currentList.push(newGoodInput.trim());
+        finalSuppliedItems = currentList.join(', ');
+      }
+    }
+
+    const updatedSupplierForm = { ...supplierForm, suppliedItems: finalSuppliedItems };
+
+    if (!validateAllSupplierForm()) {
+      fail(new Error('Please correct the highlighted validation errors on the supplier form.'));
+      return;
+    }
     try {
       if (editingSupplier) {
-        await updateSupplier(editingSupplier.id, supplierForm);
-        report(`Supplier '${supplierForm.name}' updated successfully.`);
+        await updateSupplier(editingSupplier.id, updatedSupplierForm);
+        report(`Supplier '${updatedSupplierForm.name}' updated successfully.`);
       } else {
-        await createSupplier(supplierForm);
-        report(`Supplier '${supplierForm.name}' (${supplierForm.supplierCode}) registered successfully.`);
+        await createSupplier(updatedSupplierForm);
+        report(`Supplier '${updatedSupplierForm.name}' (${updatedSupplierForm.supplierCode}) registered successfully.`);
       }
+
+      // Auto-register goods into Material inventory if requested
+      if (autoCreateMaterials && finalSuppliedItems) {
+        const goods = finalSuppliedItems.split(',').map((s) => s.trim()).filter(Boolean);
+        for (const item of goods) {
+          const alreadyExists = materials.some((m) => m.name.toLowerCase() === item.toLowerCase());
+          if (!alreadyExists) {
+            try {
+              const codePrefix = item.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase() || 'MAT';
+              const randNum = Math.floor(1000 + Math.random() * 9000);
+              await createMaterial({
+                name: item,
+                materialCode: `MAT-${codePrefix}-${randNum}`,
+                category: updatedSupplierForm.category || 'Building Materials',
+                quantity: 0,
+                unit: 'Units',
+                unitPrice: 0,
+                minStockLevel: 10,
+                supplier: updatedSupplierForm.name,
+                location: updatedSupplierForm.address || 'Central Warehouse',
+                description: `Supplied by ${updatedSupplierForm.name}`,
+              });
+            } catch {
+              // Ignore single item creation conflicts
+            }
+          }
+        }
+      }
+
       setSupplierModalOpen(false);
       setEditingSupplier(null);
       setSupplierForm(emptySupplier);
+      setNewGoodInput('');
+      setSupplierErrors({});
       await refreshData();
     } catch (err) {
       fail(err);
@@ -1024,6 +1195,7 @@ export default function InventoryManagerDashboard() {
                   required
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
                 >
+                  <option value="">-- Select Category --</option>
                   {categories.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -1042,6 +1214,7 @@ export default function InventoryManagerDashboard() {
                   required
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
                 >
+                  <option value="">-- Select Unit --</option>
                   {COMMON_UNITS.map((u) => (
                     <option key={u} value={u}>
                       {u}
@@ -1838,17 +2011,60 @@ export default function InventoryManagerDashboard() {
                   {(() => {
                     const activeSup = suppliers.find((s) => s.name.toLowerCase() === (poForm.supplier || '').toLowerCase());
                     if (!activeSup) return null;
+                    const goods = (activeSup.suppliedItems || '').split(',').map((s) => s.trim()).filter(Boolean);
                     return (
-                      <div style={{ marginTop: '8px', padding: '8px 12px', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '0.78rem' }}>
-                        <div style={{ fontWeight: 600, color: '#166534' }}>
-                          {activeSup.name} ({activeSup.supplierCode}) &bull; <span style={{ color: '#047857' }}>{activeSup.category}</span>
+                      <div style={{ marginTop: '8px', padding: '10px 12px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0', fontSize: '0.78rem' }}>
+                        <div style={{ fontWeight: 600, color: '#166534', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>{activeSup.name} ({activeSup.supplierCode}) &bull; <span style={{ color: '#047857' }}>{activeSup.category}</span></span>
+                          <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#15803d', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>{activeSup.status}</span>
                         </div>
-                        <div style={{ color: '#374151', marginTop: '2px' }}>
+                        <div style={{ color: '#374151', marginTop: '3px' }}>
                           Contact: <b>{activeSup.contactPerson || 'N/A'}</b> | {activeSup.phone || 'N/A'} | {activeSup.email || 'N/A'}
                         </div>
                         <div style={{ color: '#4b5563', marginTop: '2px' }}>
-                          Terms: <b>{activeSup.paymentTerms || 'Standard'}</b> | Supplied: <i>{activeSup.suppliedItems || 'Various'}</i>
+                          Terms: <b>{activeSup.paymentTerms || 'Standard'}</b>
                         </div>
+                        {goods.length > 0 && (
+                          <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #86efac' }}>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#166534', display: 'block', marginBottom: '4px' }}>
+                              Available Goods (click to auto-select):
+                            </span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {goods.map((good, gIdx) => {
+                                const matchedMat = materials.find((m) => m.name.toLowerCase() === good.toLowerCase());
+                                return (
+                                  <button
+                                    key={gIdx}
+                                    type="button"
+                                    onClick={() => {
+                                      if (matchedMat) {
+                                        setPoForm((prev) => ({
+                                          ...prev,
+                                          materialId: String(matchedMat.id),
+                                          unitPrice: matchedMat.unitPrice ? String(matchedMat.unitPrice) : prev.unitPrice,
+                                        }));
+                                      } else {
+                                        report(`Item "${good}" is registered under supplier catalog.`);
+                                      }
+                                    }}
+                                    style={{
+                                      background: matchedMat && String(matchedMat.id) === String(poForm.materialId) ? '#047857' : '#ffffff',
+                                      color: matchedMat && String(matchedMat.id) === String(poForm.materialId) ? '#ffffff' : '#065f46',
+                                      border: '1px solid #86efac',
+                                      borderRadius: '12px',
+                                      padding: '2px 8px',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    📦 {good} {matchedMat ? `(Stock: ${matchedMat.quantity})` : ''}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -1894,6 +2110,7 @@ export default function InventoryManagerDashboard() {
                   </label>
                   <input
                     type="date"
+                    min={today}
                     value={poForm.expectedDeliveryDate}
                     onChange={(e) => setPoForm({ ...poForm, expectedDeliveryDate: e.target.value })}
                     style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db' }}
@@ -1924,68 +2141,139 @@ export default function InventoryManagerDashboard() {
 
             {/* PO List & 1-Click Receive Action */}
             <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.2rem' }}>
-                Active purchase orders and goods receipt
-              </h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '6px' }}>
+                <h3 style={{ margin: 0, color: '#111827', fontSize: '1.2rem' }}>
+                  Active purchase orders and goods receipt
+                </h3>
+                {purchaseOrders.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportExcel(
+                        `Odiliya_Purchase_Orders_Register_${today}`,
+                        purchaseOrders.map((p) => ({
+                          'PO Number': p.poNumber || `PO-${p.id}`,
+                          'Supplier': p.supplier,
+                          'Material Item': p.material?.name || '—',
+                          'Material Code': p.material?.materialCode || '—',
+                          'Quantity': p.quantity,
+                          'Unit': p.material?.unit || 'units',
+                          'Unit Price (LKR)': p.unitPrice,
+                          'Total Amount (LKR)': p.totalAmount || (p.quantity * p.unitPrice),
+                          'Status': p.status,
+                          'Order Date': formatDate(p.orderDate),
+                          'Expected Delivery': formatDate(p.expectedDeliveryDate) || '—',
+                          'Received Date': formatDate(p.receivedDate) || '—',
+                          'Created By': p.createdBy || 'Inventory Manager',
+                        })),
+                        null,
+                        'Purchase Orders'
+                      );
+                      report('Purchase Orders master register exported as Excel spreadsheet.');
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#ecfdf5',
+                      color: '#047857',
+                      border: '1px solid #a7f3d0',
+                      borderRadius: '6px',
+                      fontWeight: 700,
+                      fontSize: '0.8rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    Export POs (Excel)
+                  </button>
+                )}
+              </div>
               <p style={{ color: '#6b7280', fontSize: '0.85rem', margin: '0 0 16px' }}>
-                When materials arrive from the supplier, click <b>Receive Materials</b> to automatically increment warehouse inventory stock.
+                When materials arrive from the supplier, click <b>Receive Materials</b> to automatically increment warehouse inventory stock, or download the official goods purchase invoice.
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '520px', overflowY: 'auto' }}>
                 {purchaseOrders.length === 0 ? (
                   <p style={{ color: '#6b7280', textAlign: 'center', padding: '30px' }}>No purchase orders created yet.</p>
                 ) : (
-                  purchaseOrders.map((po) => (
-                    <div
-                      key={po.id}
-                      style={{
-                        padding: '14px',
-                        borderRadius: '8px',
-                        border: '1px solid #e5e7eb',
-                        background: po.status === 'ORDERED' ? '#eff6ff' : '#f0fdf4',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                        <div>
-                          <strong style={{ color: '#111827', fontSize: '0.95rem' }}>{po.poNumber}</strong>
-                          <span style={{ fontSize: '0.8rem', color: '#4b5563', marginLeft: '6px' }}>{po.supplier}</span>
+                  purchaseOrders.map((po) => {
+                    const supObj = suppliers.find(
+                      (s) => s.name?.toLowerCase().trim() === po.supplier?.toLowerCase().trim()
+                    );
+                    return (
+                      <div
+                        key={po.id}
+                        style={{
+                          padding: '16px',
+                          borderRadius: '10px',
+                          border: '1px solid #e5e7eb',
+                          background: po.status === 'ORDERED' ? '#eff6ff' : '#f0fdf4',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <div>
+                            <strong style={{ color: '#111827', fontSize: '0.98rem' }}>{po.poNumber}</strong>
+                            <span style={{ fontSize: '0.84rem', color: '#4b5563', marginLeft: '8px', fontWeight: 600 }}>{po.supplier}</span>
+                          </div>
+                          <span style={{
+                            padding: '3px 10px',
+                            borderRadius: '12px',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            background: po.status === 'ORDERED' ? '#dbeafe' : '#dcfce7',
+                            color: po.status === 'ORDERED' ? '#1e40af' : '#166534',
+                          }}>
+                            {po.status}
+                          </span>
                         </div>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: '12px',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          background: po.status === 'ORDERED' ? '#dbeafe' : '#dcfce7',
-                          color: po.status === 'ORDERED' ? '#1e40af' : '#166534',
-                        }}>
-                          {po.status}
-                        </span>
-                      </div>
 
-                      <div style={{ fontSize: '0.85rem', color: '#374151', margin: '4px 0' }}>
-                        Item: <b>{po.material?.name}</b> | Quantity: <b>{po.quantity} {po.material?.unit}</b> | Total: <b>{formatMoney(po.totalAmount)}</b>
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                        Ordered Date: {formatDate(po.orderDate)}
-                        {po.expectedDeliveryDate ? ` | Expected: ${formatDate(po.expectedDeliveryDate)}` : ''}
-                      </div>
+                        <div style={{ fontSize: '0.86rem', color: '#374151', margin: '6px 0' }}>
+                          Item: <b>{po.material?.name}</b> ({po.material?.materialCode}) | Quantity: <b>{po.quantity} {po.material?.unit}</b> | Total: <b style={{ color: '#047857' }}>{formatMoney(po.totalAmount || (po.quantity * (po.unitPrice || 0)))}</b>
+                        </div>
+                        <div style={{ fontSize: '0.76rem', color: '#6b7280', marginBottom: '10px' }}>
+                          Ordered Date: {formatDate(po.orderDate)}
+                          {po.expectedDeliveryDate ? ` | Expected: ${formatDate(po.expectedDeliveryDate)}` : ''}
+                          {po.receivedDate ? ` | Received: ${formatDate(po.receivedDate)}` : ''}
+                        </div>
 
-                      {po.status === 'ORDERED' ? (
-                        <div style={{ marginTop: '10px' }}>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {po.status === 'ORDERED' && (
+                            <button
+                              type="button"
+                              onClick={() => handleReceivePO(po.id)}
+                              style={{ padding: '6px 14px', background: '#047857', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              Receive materials &amp; update stock
+                            </button>
+                          )}
                           <button
-                            onClick={() => handleReceivePO(po.id)}
-                            style={{ padding: '6px 14px', background: '#047857', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                            type="button"
+                            onClick={() => {
+                              downloadPurchaseOrderInvoice(po, supObj);
+                              report(`Purchase Order Invoice for ${po.poNumber} downloaded successfully.`);
+                            }}
+                            style={{
+                              padding: '6px 14px',
+                              background: '#ffffff',
+                              color: '#047857',
+                              border: '1px solid #047857',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                            }}
+                            title="Download official goods procurement purchase PDF invoice"
                           >
-                            Receive materials and update inventory stock
+                            📄 Download PDF Invoice
                           </button>
                         </div>
-                      ) : (
-                        <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#166534', fontWeight: 600 }}>
-                          Received on {formatDate(po.receivedDate)} | Stock added to inventory
-                        </div>
-                      )}
-                    </div>
-                  ))
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -2123,16 +2411,113 @@ export default function InventoryManagerDashboard() {
           <div>
             {/* Documents & Compliance Downloads Banner */}
             <div style={{ background: '#ffffff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '24px' }}>
-              <div style={{ marginBottom: '16px' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
-                  PROCUREMENT &amp; WAREHOUSE VAULT
-                </span>
-                <h2 style={{ margin: '6px 0 4px', color: '#111827', fontSize: '1.35rem', fontWeight: 800 }}>
-                  Material Documents & Invoices Vault
-                </h2>
-                <p style={{ margin: 0, color: '#6b7280', fontSize: '0.85rem' }}>
-                  Official supplier delivery receipts, material quality certificates, safety data sheets (MSDS), and master procurement agreements.
-                </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+                <div>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', background: '#ecfdf5', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                    PROCUREMENT &amp; WAREHOUSE VAULT
+                  </span>
+                  <h2 style={{ margin: '6px 0 4px', color: '#111827', fontSize: '1.35rem', fontWeight: 800 }}>
+                    Material Documents &amp; Purchase Invoices Vault
+                  </h2>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.85rem' }}>
+                    Download official supplier purchase order invoices, goods receiving notes (GRN), quality certifications, and procurement registers.
+                  </p>
+                </div>
+
+                {purchaseOrders.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportExcel(
+                        `Odiliya_Procurement_Purchases_Register_${today}`,
+                        purchaseOrders.map((p) => ({
+                          'PO Number': p.poNumber || `PO-${p.id}`,
+                          'Supplier': p.supplier,
+                          'Item Name': p.material?.name || '—',
+                          'Item Code': p.material?.materialCode || '—',
+                          'Category': p.material?.category || '—',
+                          'Quantity': p.quantity,
+                          'Unit': p.material?.unit || 'units',
+                          'Unit Price (LKR)': p.unitPrice,
+                          'Total Value (LKR)': p.totalAmount || (p.quantity * p.unitPrice),
+                          'Status': p.status,
+                          'Order Date': formatDate(p.orderDate),
+                          'Expected Delivery': formatDate(p.expectedDeliveryDate) || '—',
+                          'Goods Received Date': formatDate(p.receivedDate) || '—',
+                          'Authorized By': p.createdBy || 'Inventory Manager',
+                        })),
+                        null,
+                        'Purchases Register'
+                      );
+                      report('Procurement Purchases Master Register exported as Excel.');
+                    }}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    Export All POs (Excel)
+                  </button>
+                )}
+              </div>
+
+              {/* Purchase Invoices Quick Downloader */}
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '20px', background: '#f9fafb', padding: '16px', borderRadius: '10px', border: '1px solid #e5e7eb' }}>
+                <div style={{ flex: 1, minWidth: '260px' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#374151', marginBottom: '6px' }}>
+                    Download Official Supplier Purchase Invoice:
+                  </label>
+                  <select
+                    value={selectedInvoicePoId}
+                    onChange={(e) => setSelectedInvoicePoId(e.target.value)}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.88rem', background: '#fff', fontWeight: 600 }}
+                  >
+                    <option value="">-- Choose Purchase Order ({purchaseOrders.length} available) --</option>
+                    {purchaseOrders.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.poNumber || `PO-${p.id}`} — {p.supplier} | {p.material?.name} ({formatMoney(p.totalAmount || (p.quantity * p.unitPrice))}) [{p.status}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  disabled={!selectedInvoicePoId}
+                  onClick={() => {
+                    const selectedPo = purchaseOrders.find((p) => String(p.id) === String(selectedInvoicePoId));
+                    if (selectedPo) {
+                      const sup = suppliers.find((s) => s.name?.toLowerCase().trim() === selectedPo.supplier?.toLowerCase().trim());
+                      downloadPurchaseOrderInvoice(selectedPo, sup);
+                      report(`Purchase Invoice for ${selectedPo.poNumber} downloaded successfully.`);
+                    }
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    background: selectedInvoicePoId ? '#047857' : '#9ca3af',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '0.88rem',
+                    cursor: selectedInvoicePoId ? 'pointer' : 'not-allowed',
+                    alignSelf: 'flex-end',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: selectedInvoicePoId ? '0 2px 4px rgba(4,120,87,0.2)' : 'none',
+                  }}
+                >
+                  📄 Download Selected PDF Invoice
+                </button>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '8px' }}>
@@ -2615,16 +3000,18 @@ export default function InventoryManagerDashboard() {
                         <th style={{ padding: '12px 14px', color: '#374151' }}>TOTAL COST</th>
                         <th style={{ padding: '12px 14px', color: '#374151' }}>STATUS</th>
                         <th style={{ padding: '12px 14px', color: '#374151' }}>DELIVERY DATE</th>
+                        <th style={{ padding: '12px 14px', color: '#374151', textAlign: 'right' }}>INVOICE</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredReportPOs.length === 0 ? (
                         <tr>
-                          <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No purchase orders match report criteria.</td>
+                          <td colSpan="9" style={{ padding: '30px', textAlign: 'center', color: '#6b7280' }}>No purchase orders match report criteria.</td>
                         </tr>
                       ) : (
                         filteredReportPOs.map((p) => {
                           const total = Number(p.totalCost || (p.quantity * p.unitPrice) || 0);
+                          const supObj = suppliers.find((s) => s.name?.toLowerCase().trim() === p.supplier?.toLowerCase().trim());
                           return (
                             <tr key={p.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                               <td style={{ padding: '10px 14px' }}>
@@ -2649,6 +3036,28 @@ export default function InventoryManagerDashboard() {
                                 </span>
                               </td>
                               <td style={{ padding: '10px 14px', color: '#6b7280' }}>{formatDate(p.expectedDeliveryDate) || '—'}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    downloadPurchaseOrderInvoice(p, supObj);
+                                    report(`Purchase Invoice for ${p.poNumber || `PO-${p.id}`} downloaded.`);
+                                  }}
+                                  style={{
+                                    padding: '4px 10px',
+                                    background: '#ecfdf5',
+                                    color: '#047857',
+                                    border: '1px solid #a7f3d0',
+                                    borderRadius: '6px',
+                                    fontWeight: 700,
+                                    fontSize: '0.75rem',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  📄 PDF Invoice
+                                </button>
+                              </td>
                             </tr>
                           );
                         })
@@ -2804,11 +3213,23 @@ export default function InventoryManagerDashboard() {
                   <input
                     type="text"
                     value={supplierForm.name}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                    onChange={(e) => handleSupplierChange('name', e.target.value)}
                     placeholder="e.g. Tokyo Super Cement Lanka"
                     required
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: supplierErrors.name ? '1.5px solid #dc2626' : '1px solid #d1d5db',
+                      boxSizing: 'border-box',
+                      background: supplierErrors.name ? '#fef2f2' : '#ffffff',
+                    }}
                   />
+                  {supplierErrors.name && (
+                    <span style={{ display: 'block', color: '#dc2626', fontSize: '0.74rem', marginTop: '3px', fontWeight: 600 }}>
+                      {supplierErrors.name}
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -2817,10 +3238,11 @@ export default function InventoryManagerDashboard() {
                   </label>
                   <select
                     value={supplierForm.category}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, category: e.target.value })}
+                    onChange={(e) => handleSupplierChange('category', e.target.value)}
                     required
                     style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
                   >
+                    <option value="">-- Select Category --</option>
                     {categories.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
@@ -2833,9 +3255,11 @@ export default function InventoryManagerDashboard() {
                   </label>
                   <select
                     value={supplierForm.status}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })}
+                    onChange={(e) => handleSupplierChange('status', e.target.value)}
+                    required
                     style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
                   >
+                    <option value="">-- Select Status --</option>
                     <option value="ACTIVE">ACTIVE</option>
                     <option value="INACTIVE">INACTIVE</option>
                   </select>
@@ -2848,10 +3272,22 @@ export default function InventoryManagerDashboard() {
                   <input
                     type="text"
                     value={supplierForm.contactPerson}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })}
+                    onChange={(e) => handleSupplierChange('contactPerson', e.target.value)}
                     placeholder="e.g. Nimal Perera (Sales Director)"
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: supplierErrors.contactPerson ? '1.5px solid #dc2626' : '1px solid #d1d5db',
+                      boxSizing: 'border-box',
+                      background: supplierErrors.contactPerson ? '#fef2f2' : '#ffffff',
+                    }}
                   />
+                  {supplierErrors.contactPerson && (
+                    <span style={{ display: 'block', color: '#dc2626', fontSize: '0.74rem', marginTop: '3px', fontWeight: 600 }}>
+                      {supplierErrors.contactPerson}
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -2861,11 +3297,23 @@ export default function InventoryManagerDashboard() {
                   <input
                     type="text"
                     value={supplierForm.phone}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })}
-                    placeholder="e.g. +94 11 234 5678"
+                    onChange={(e) => handleSupplierChange('phone', e.target.value)}
+                    placeholder="e.g. +94 11 234 5678 or 0771234567"
                     required
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: supplierErrors.phone ? '1.5px solid #dc2626' : '1px solid #d1d5db',
+                      boxSizing: 'border-box',
+                      background: supplierErrors.phone ? '#fef2f2' : '#ffffff',
+                    }}
                   />
+                  {supplierErrors.phone && (
+                    <span style={{ display: 'block', color: '#dc2626', fontSize: '0.74rem', marginTop: '3px', fontWeight: 600 }}>
+                      {supplierErrors.phone}
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -2875,10 +3323,22 @@ export default function InventoryManagerDashboard() {
                   <input
                     type="email"
                     value={supplierForm.email}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })}
+                    onChange={(e) => handleSupplierChange('email', e.target.value)}
                     placeholder="e.g. sales@tokyocement.lk"
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: supplierErrors.email ? '1.5px solid #dc2626' : '1px solid #d1d5db',
+                      boxSizing: 'border-box',
+                      background: supplierErrors.email ? '#fef2f2' : '#ffffff',
+                    }}
                   />
+                  {supplierErrors.email && (
+                    <span style={{ display: 'block', color: '#dc2626', fontSize: '0.74rem', marginTop: '3px', fontWeight: 600 }}>
+                      {supplierErrors.email}
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -2887,26 +3347,181 @@ export default function InventoryManagerDashboard() {
                   </label>
                   <select
                     value={supplierForm.paymentTerms}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, paymentTerms: e.target.value })}
+                    onChange={(e) => handleSupplierChange('paymentTerms', e.target.value)}
                     style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box', background: '#fff' }}
                   >
+                    <option value="">-- Select Payment Terms --</option>
                     {PAYMENT_TERMS_OPTIONS.map((term) => (
                       <option key={term} value={term}>{term}</option>
                     ))}
                   </select>
                 </div>
 
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                    Supplied Goods &amp; Items (Catalog)
-                  </label>
-                  <input
-                    type="text"
-                    value={supplierForm.suppliedItems}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, suppliedItems: e.target.value })}
-                    placeholder="e.g. Portland Cement, Ready-mix concrete, Mortar, Masonry Sand"
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
-                  />
+                <div style={{ gridColumn: 'span 2', background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#1e293b' }}>
+                      📦 Goods &amp; Items Available Through Supplier *
+                    </label>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 500 }}>
+                      {((supplierForm.suppliedItems || '').split(',').map((s) => s.trim()).filter(Boolean)).length} item(s) listed
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0 0 10px' }}>
+                    Specify materials or products this supplier provides. You can type new items or pick from existing inventory materials.
+                  </p>
+
+                  {/* Add Good Controls: Input + Add Button + Material Picker */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                    <div style={{ flex: '1 1 220px', display: 'flex', gap: '6px' }}>
+                      <input
+                        type="text"
+                        value={newGoodInput}
+                        onChange={(e) => setNewGoodInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddSupplierGood(newGoodInput);
+                          }
+                        }}
+                        placeholder="Type item name (e.g. Portland Cement 50kg, Sand, 12mm Rebar)..."
+                        style={{
+                          flex: 1,
+                          padding: '8px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '0.82rem',
+                          background: '#ffffff',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddSupplierGood(newGoodInput)}
+                        style={{
+                          padding: '8px 14px',
+                          background: '#047857',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        + Add Item
+                      </button>
+                    </div>
+
+                    <div style={{ flex: '1 1 200px' }}>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleAddSupplierGood(e.target.value);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '0.82rem',
+                          background: '#ffffff',
+                          color: '#475569',
+                          boxSizing: 'border-box',
+                        }}
+                      >
+                        <option value="">+ Pick from existing inventory materials...</option>
+                        {materials.map((m) => (
+                          <option key={m.id} value={m.name}>
+                            {m.name} ({m.materialCode || m.category})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Active Goods Chips/Badges */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', minHeight: '34px', padding: '8px', background: '#ffffff', borderRadius: '6px', border: supplierErrors.suppliedItems ? '1.5px solid #dc2626' : '1px solid #e2e8f0', alignItems: 'center' }}>
+                    {(() => {
+                      const items = (supplierForm.suppliedItems || '')
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+
+                      if (items.length === 0) {
+                        return (
+                          <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                            No goods added yet. Type an item name above or select from the dropdown.
+                          </span>
+                        );
+                      }
+
+                      return items.map((item, idx) => (
+                        <span
+                          key={idx}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 10px',
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1px solid #a7f3d0',
+                            borderRadius: '16px',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          <span>{item}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSupplierGood(idx)}
+                            style={{
+                              border: 'none',
+                              background: '#d1fae5',
+                              color: '#065f46',
+                              borderRadius: '50%',
+                              width: '16px',
+                              height: '16px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                              lineHeight: 1,
+                              padding: 0,
+                            }}
+                            title="Remove item"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ));
+                    })()}
+                  </div>
+
+                  {supplierErrors.suppliedItems && (
+                    <span style={{ display: 'block', color: '#dc2626', fontSize: '0.74rem', marginTop: '4px', fontWeight: 600 }}>
+                      {supplierErrors.suppliedItems}
+                    </span>
+                  )}
+
+                  {/* Auto-register items into Inventory Materials Checkbox */}
+                  <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="checkbox"
+                      id="autoCreateMatsCheckbox"
+                      checked={autoCreateMaterials}
+                      onChange={(e) => setAutoCreateMaterials(e.target.checked)}
+                      style={{ cursor: 'pointer', width: '15px', height: '15px', accentColor: '#047857' }}
+                    />
+                    <label htmlFor="autoCreateMatsCheckbox" style={{ fontSize: '0.78rem', color: '#334155', cursor: 'pointer', fontWeight: 500 }}>
+                      Automatically register new goods into Materials Inventory with this supplier
+                    </label>
+                  </div>
                 </div>
 
                 <div style={{ gridColumn: 'span 2' }}>
@@ -2916,10 +3531,22 @@ export default function InventoryManagerDashboard() {
                   <input
                     type="text"
                     value={supplierForm.address}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
+                    onChange={(e) => handleSupplierChange('address', e.target.value)}
                     placeholder="e.g. No. 45, Industrial Zone, Kelaniya"
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: supplierErrors.address ? '1.5px solid #dc2626' : '1px solid #d1d5db',
+                      boxSizing: 'border-box',
+                      background: supplierErrors.address ? '#fef2f2' : '#ffffff',
+                    }}
                   />
+                  {supplierErrors.address && (
+                    <span style={{ display: 'block', color: '#dc2626', fontSize: '0.74rem', marginTop: '3px', fontWeight: 600 }}>
+                      {supplierErrors.address}
+                    </span>
+                  )}
                 </div>
 
                 <div style={{ gridColumn: 'span 2' }}>
@@ -2929,7 +3556,7 @@ export default function InventoryManagerDashboard() {
                   <textarea
                     rows="2"
                     value={supplierForm.notes}
-                    onChange={(e) => setSupplierForm({ ...supplierForm, notes: e.target.value })}
+                    onChange={(e) => handleSupplierChange('notes', e.target.value)}
                     placeholder="e.g. Preferred partner for bulk civil works, fast 24h delivery on demand..."
                     style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #d1d5db', boxSizing: 'border-box' }}
                   />

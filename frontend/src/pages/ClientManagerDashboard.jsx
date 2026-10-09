@@ -39,6 +39,7 @@ import {
   deleteDownPayment,
   getBankDetails,
   updateBankDetails,
+  linkInquiryContract,
   formatDate,
   formatMoney,
 } from '../services/api';
@@ -148,6 +149,7 @@ export default function ClientManagerDashboard() {
 
   const [contractModalOpen, setContractModalOpen] = useState(false);
   const [editingContract, setEditingContract] = useState(null);
+  const [contractLinkedInquiryId, setContractLinkedInquiryId] = useState(null);
   const [contractForm, setContractForm] = useState({
     contractNumber: '',
     title: '',
@@ -381,6 +383,35 @@ export default function ClientManagerDashboard() {
     }
   };
 
+  const handleOpenContractModalFromInquiry = (inq) => {
+    setEditingContract(null);
+    setContractLinkedInquiryId(inq.id);
+    const clientObj = inq.client || (inq.clientId ? clients.find((c) => c.id === inq.clientId) : clients[0]);
+    const titleStr = inq.subject ? `Contract Agreement - ${inq.subject}` : `Contract Agreement - ${inq.design?.name || inq.project?.name || 'Project'}`;
+    const budgetVal = inq.pmEstimatedBudget ? String(inq.pmEstimatedBudget) : (inq.project?.budget ? String(inq.project.budget) : '');
+    const nextNumber = `OD-CON-2026-${String(contracts.length + 1).padStart(3, '0')}`;
+    const termsText = [
+      `PM Feasibility Decision: ${inq.pmDecision || 'APPROVED'}`,
+      inq.pmDecisionDate ? `PM Decision Date: ${formatDate(inq.pmDecisionDate)}` : '',
+      inq.pmDecisionRemarks ? `PM Technical Remarks: ${inq.pmDecisionRemarks}` : '',
+      inq.pmEstimatedDuration ? `Estimated Project Timeline: ${inq.pmEstimatedDuration}` : '',
+      `Client: ${clientObj?.name || 'Client'} (${clientObj?.email || ''})`,
+      `Agreement Terms: Standard construction contract between Odiliya Homes & Luxury Properties and ${clientObj?.name || 'the Client'}.`
+    ].filter(Boolean).join('\n');
+
+    setContractForm({
+      contractNumber: nextNumber,
+      title: titleStr,
+      amount: budgetVal,
+      signedDate: new Date().toISOString().slice(0, 10),
+      endDate: '',
+      status: 'ACTIVE',
+      terms: termsText,
+      clientId: clientObj?.id ? String(clientObj.id) : (clients[0]?.id ? String(clients[0].id) : ''),
+    });
+    setContractModalOpen(true);
+  };
+
   const handleSaveContract = async (e) => {
     e.preventDefault();
     try {
@@ -394,13 +425,22 @@ export default function ClientManagerDashboard() {
         terms: contractForm.terms,
         client: { id: Number(contractForm.clientId) },
       };
+      let saved = null;
       if (editingContract) {
-        await updateContract(editingContract.id, payload);
+        saved = await updateContract(editingContract.id, payload);
         setSuccessMsg('Contract updated!');
       } else {
-        await createContract(payload);
-        setSuccessMsg('New contract recorded!');
+        saved = await createContract(payload);
+        if (contractLinkedInquiryId && saved?.id) {
+          try {
+            await linkInquiryContract(contractLinkedInquiryId, saved.id);
+          } catch (linkErr) {
+            console.warn('Could not link inquiry contract:', linkErr);
+          }
+        }
+        setSuccessMsg('New contract recorded & agreement prepared!');
       }
+      setContractLinkedInquiryId(null);
       setContractModalOpen(false);
       await loadAllData();
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -974,7 +1014,7 @@ export default function ClientManagerDashboard() {
             className={activeTab === 'inquiries' ? 'active' : ''}
             onClick={() => setActiveTab('inquiries')}
           >
-            Client Inquiries ({inquiries.filter((i) => i.status === 'PENDING').length > 0 ? `${inquiries.length} (${inquiries.filter((i) => i.status === 'PENDING').length} Pending)` : inquiries.length})
+            Client Inquiries ({inquiries.filter((i) => i.pmDecision !== 'REJECTED').length})
           </button>
 
           <button
@@ -1374,19 +1414,26 @@ export default function ClientManagerDashboard() {
 
         {/* TAB 6: INQUIRIES */}
         {activeTab === 'inquiries' && (() => {
+          // Exclude inquiries that were rejected by the Project Manager (not shown to Client Manager)
+          const cmVisibleInquiries = inquiries.filter((i) => i.pmDecision !== 'REJECTED');
           const clientScopedInquiries = inquiryClientFilter
-            ? inquiries.filter((i) => String(i.client?.id) === String(inquiryClientFilter))
-            : inquiries;
+            ? cmVisibleInquiries.filter((i) => String(i.client?.id) === String(inquiryClientFilter))
+            : cmVisibleInquiries;
           const inquiryClients = clients
-            .map((c) => ({ ...c, inquiryCount: inquiries.filter((i) => i.client?.id === c.id).length, pendingCount: inquiries.filter((i) => i.client?.id === c.id && i.status === 'PENDING').length }))
+            .map((c) => ({
+              ...c,
+              inquiryCount: cmVisibleInquiries.filter((i) => i.client?.id === c.id).length,
+              pendingCount: cmVisibleInquiries.filter((i) => i.client?.id === c.id && (i.status === 'PENDING' || (i.pmDecision === 'APPROVED' && !i.contractGenerated))).length
+            }))
+            .filter((c) => c.inquiryCount > 0)
             .sort((a, b) => (b.pendingCount - a.pendingCount) || (b.inquiryCount - a.inquiryCount) || (a.name || '').localeCompare(b.name || ''));
           return (
           <div className="light-panel-card">
             <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
-                <span className="brand-green-subtitle">CLIENT SUPPORT &amp; INQUIRIES</span>
-                <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Client Inquiries Inbox</h3>
-                <p className="panel-meta" style={{ margin: 0 }}>Review customer inquiries, send new inquiries to clients, and continue conversations with them.</p>
+                <span className="brand-green-subtitle">CLIENT SUPPORT &amp; CONTRACT DRAFTING</span>
+                <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Client Inquiries &amp; Approved Contracts</h3>
+                <p className="panel-meta" style={{ margin: 0 }}>Review customer inquiries approved by the Project Manager and generate legal client contracts.</p>
               </div>
               <button type="button" className="btn-solid-green" onClick={openComposeInquiry}>
                 New Inquiry to Client
@@ -1401,10 +1448,10 @@ export default function ClientManagerDashboard() {
                 onChange={(e) => setInquiryClientFilter(e.target.value)}
                 style={{ minWidth: 280, padding: '0.45rem 0.7rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
               >
-                <option value="">All Clients ({inquiries.length} inquiries)</option>
+                <option value="">All Clients ({cmVisibleInquiries.length} inquiries)</option>
                 {inquiryClients.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} — {c.inquiryCount} {c.inquiryCount === 1 ? 'inquiry' : 'inquiries'}{c.pendingCount > 0 ? ` (${c.pendingCount} pending)` : ''}
+                    {c.name} — {c.inquiryCount} {c.inquiryCount === 1 ? 'inquiry' : 'inquiries'}{c.pendingCount > 0 ? ` (${c.pendingCount} action items)` : ''}
                   </option>
                 ))}
               </select>
@@ -1535,6 +1582,108 @@ export default function ClientManagerDashboard() {
                         </div>
 
                         <InquiryThread inquiry={inq} viewerRole="CLIENT_MANAGER" />
+
+                        {/* PM Technical Feasibility Decision Banner & Contract Flow */}
+                        {inq.pmDecision === 'APPROVED' ? (
+                          <div style={{
+                            margin: '0.85rem 0',
+                            padding: '0.9rem 1.1rem',
+                            background: '#ecfdf5',
+                            border: '1.5px solid #10b981',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '0.85rem'
+                          }}>
+                            <div style={{ flex: '1 1 300px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ background: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px', letterSpacing: '0.5px' }}>
+                                  ✓ PM FEASIBILITY APPROVED
+                                </span>
+                                <span style={{ fontSize: '0.82rem', color: '#065f46', fontWeight: 600 }}>
+                                  Evaluated on {inq.pmDecisionDate ? formatDate(inq.pmDecisionDate) : 'Recently'}
+                                </span>
+                              </div>
+                              <div style={{ marginTop: '0.45rem', fontSize: '0.88rem', color: '#064e3b', display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                                {inq.pmEstimatedBudget > 0 && <span><strong>PM Estimated Budget:</strong> {formatMoney(inq.pmEstimatedBudget)}</span>}
+                                {inq.pmEstimatedDuration && <span><strong>Estimated Timeline:</strong> {inq.pmEstimatedDuration}</span>}
+                              </div>
+                              {inq.pmDecisionRemarks && (
+                                <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: '#047857' }}>
+                                  <strong>PM Technical Remarks:</strong> {inq.pmDecisionRemarks}
+                                </p>
+                              )}
+                            </div>
+
+                            <div>
+                              {inq.contractGenerated ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#047857', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 700 }}>
+                                  ✓ Contract Agreement Active #{inq.contractId || ''}
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenContractModalFromInquiry(inq)}
+                                  style={{
+                                    background: '#047857',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    padding: '8px 16px',
+                                    borderRadius: '6px',
+                                    fontWeight: 700,
+                                    fontSize: '0.85rem',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    boxShadow: '0 2px 4px rgba(4,120,87,0.2)'
+                                  }}
+                                >
+                                  📝 Generate &amp; Sign Contract Agreement with Client →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : inq.pmDecision === 'REJECTED' ? (
+                          <div style={{
+                            margin: '0.85rem 0',
+                            padding: '0.85rem 1rem',
+                            background: '#fef2f2',
+                            border: '1.5px solid #ef4444',
+                            borderRadius: '8px',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ background: '#dc2626', color: '#fff', fontSize: '0.75rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
+                                ✕ PM FEASIBILITY REJECTED
+                              </span>
+                              <span style={{ fontSize: '0.82rem', color: '#991b1b', fontWeight: 600 }}>
+                                Decided on {inq.pmDecisionDate ? formatDate(inq.pmDecisionDate) : 'Recently'}
+                              </span>
+                            </div>
+                            {inq.pmDecisionRemarks && (
+                              <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: '#b91c1c' }}>
+                                <strong>PM Reason:</strong> {inq.pmDecisionRemarks}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{
+                            margin: '0.65rem 0',
+                            padding: '0.5rem 0.85rem',
+                            background: '#f8fafc',
+                            border: '1px dashed #cbd5e1',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '0.82rem',
+                            color: '#475569'
+                          }}>
+                            <span>⏳ <strong>Awaiting PM Technical Feasibility:</strong> Direct evaluation between Client &amp; Project Manager in progress.</span>
+                          </div>
+                        )}
 
                         {inq.attachmentData && (
                           <div style={{ marginBottom: '0.75rem' }}>

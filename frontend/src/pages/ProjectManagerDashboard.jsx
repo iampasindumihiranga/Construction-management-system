@@ -6,25 +6,31 @@ import {
   assignEmployeeProjects,
   createEmployee,
   createExpense,
+  createInquiry,
   createProject,
   createTask,
   deleteExpense,
+  deleteInquiry,
   deleteProject,
   formatDate,
   formatMoney,
   getAllEmployees,
   getClients,
   getExpenses,
+  getInquiries,
   getProjectManagementSummary,
   getProjects,
   getTasks,
   getForwardedProjectRequests,
   pmReplyProjectRequest,
+  sendInquiryMessage,
   startProjectFromRequest,
+  submitInquiryDecision,
   updateProject,
   updateTask,
 } from '../services/api';
-import { downloadFile, exportCsv } from '../utils/documentDownload';
+import { downloadFile, exportCsv, generateProjectDetailsPdf } from '../utils/documentDownload';
+import InquiryThread from '../components/InquiryThread';
 
 const statuses = ['PLANNING', 'IN_PROGRESS', 'ON_HOLD', 'COMPLETED', 'CANCELLED'];
 
@@ -38,14 +44,14 @@ const readImageAsDataUrl = (file) => new Promise((resolve, reject) => {
 const emptyProject = {
   name: '',
   description: '',
-  category: 'RESIDENCIES',
+  category: '',
   clientId: '',
   location: '',
   startDate: '',
   endDate: '',
   budget: '',
-  status: 'PLANNING',
-  progressPercentage: 0,
+  status: '',
+  progressPercentage: '',
   imageUrl: '',
   specifications: '',
   constructionStatus: '',
@@ -58,15 +64,15 @@ const emptyTask = {
   assignedEmployeeId: '',
   startDate: '',
   deadline: '',
-  status: 'TODO',
+  status: '',
 };
 
 const emptyMilestone = {
   title: '',
   description: '',
   targetDate: '',
-  status: 'PENDING',
-  progressPercentage: 0,
+  status: '',
+  progressPercentage: '',
 };
 
 const emptyExpense = {
@@ -76,8 +82,8 @@ const emptyExpense = {
 };
 
 const Status = ({ value }) => (
-  <span className={`pm-status ${String(value).toLowerCase().replaceAll('_', '-')}`}>
-    {String(value).replaceAll('_', ' ')}
+  <span className={`pm-status ${String(value || '').toLowerCase().replaceAll('_', '-')}`}>
+    {String(value || '').replaceAll('_', ' ')}
   </span>
 );
 
@@ -93,6 +99,24 @@ export default function ProjectManagerDashboard() {
   // Selected project context for detail segments (Tasks, Milestones, Expenses, Team)
   const [selectedProjectId, setSelectedProjectId] = useState('');
 
+  // Direct Client Inquiries (Direct PM-Client Flow)
+  const [inquiries, setInquiries] = useState([]);
+  const [inquiryFilterStatus, setInquiryFilterStatus] = useState('ALL');
+  const [inquiryProjectFilter, setInquiryProjectFilter] = useState('');
+  const [inquiryClientFilter, setInquiryClientFilter] = useState('');
+  const [inquirySearch, setInquirySearch] = useState('');
+  const [pmReplyingInquiryId, setPmReplyingInquiryId] = useState(null);
+  const [pmReplyText, setPmReplyText] = useState('');
+  const [sendingPmReply, setSendingPmReply] = useState(false);
+  const [composeInquiryOpen, setComposeInquiryOpen] = useState(false);
+  const [composeInquiryForm, setComposeInquiryForm] = useState({
+    clientId: '',
+    projectId: '',
+    subject: '',
+    message: '',
+  });
+  const [sendingComposeInquiry, setSendingComposeInquiry] = useState(false);
+
   // Forms
   const [projectForm, setProjectForm] = useState(emptyProject);
   const [taskForm, setTaskForm] = useState(emptyTask);
@@ -100,6 +124,8 @@ export default function ProjectManagerDashboard() {
   const [expenseForm, setExpenseForm] = useState(emptyExpense);
   const [employeeForm, setEmployeeForm] = useState({ name: '', email: '', role: '' });
   const [editingProject, setEditingProject] = useState(null);
+  const [projectFilterCategory, setProjectFilterCategory] = useState('ALL');
+  const [projectSearchQuery, setProjectSearchQuery] = useState('');
 
   // Client Assignment state
   const [clientAssignProject, setClientAssignProject] = useState('');
@@ -123,13 +149,24 @@ export default function ProjectManagerDashboard() {
   const [submittingPmReply, setSubmittingPmReply] = useState(false);
   const [pmPreviewPhotosModal, setPmPreviewPhotosModal] = useState(null);
 
+  // PM Inquiry Decision State
+  const [inquiryDecisionModalOpen, setInquiryDecisionModalOpen] = useState(false);
+  const [inquiryDecisionTarget, setInquiryDecisionTarget] = useState(null);
+  const [inquiryDecisionForm, setInquiryDecisionForm] = useState({
+    decision: 'APPROVED',
+    decisionRemarks: '',
+    estimatedBudget: '',
+    estimatedDuration: '8 - 10 Months',
+  });
+  const [submittingInquiryDecision, setSubmittingInquiryDecision] = useState(false);
+
   // Start Project from Approved Request Modal
   const [startProjectModalOpen, setStartProjectModalOpen] = useState(false);
   const [startProjectTarget, setStartProjectTarget] = useState(null);
   const [startProjectForm, setStartProjectForm] = useState({
     name: '',
     description: '',
-    category: 'RESIDENCIES',
+    category: '',
     location: '',
     budget: '',
     startDate: '',
@@ -150,9 +187,10 @@ export default function ProjectManagerDashboard() {
         getTasks(),
         getExpenses(),
         getForwardedProjectRequests(),
+        getInquiries(),
       ]);
 
-      const [sumRes, projRes, clientRes, empRes, taskRes, expRes, reqRes] = results;
+      const [sumRes, projRes, clientRes, empRes, taskRes, expRes, reqRes, inqRes] = results;
       const nextSummary = sumRes.status === 'fulfilled' ? sumRes.value : {};
       const nextProjects = projRes.status === 'fulfilled' ? projRes.value || [] : [];
       const nextClients = clientRes.status === 'fulfilled' ? clientRes.value || [] : [];
@@ -160,6 +198,7 @@ export default function ProjectManagerDashboard() {
       const nextTasks = taskRes.status === 'fulfilled' ? taskRes.value || [] : [];
       const nextExpenses = expRes.status === 'fulfilled' ? expRes.value || [] : [];
       const nextRequests = reqRes.status === 'fulfilled' ? reqRes.value || [] : [];
+      const nextInquiries = inqRes.status === 'fulfilled' ? inqRes.value || [] : [];
 
       setSummary(nextSummary || {});
       setProjects(nextProjects);
@@ -168,6 +207,7 @@ export default function ProjectManagerDashboard() {
       setTasks(nextTasks);
       setExpenses(nextExpenses);
       setForwardedRequests(nextRequests);
+      setInquiries(nextInquiries);
 
       if (!selectedProjectId && nextProjects.length > 0) {
         setSelectedProjectId(String(nextProjects[0].id));
@@ -209,6 +249,77 @@ export default function ProjectManagerDashboard() {
       setError(err.message || 'Failed to submit PM reply');
     } finally {
       setSubmittingPmReply(false);
+    }
+  };
+
+  const handleOpenInquiryDecisionModal = (inquiry, defaultDecision = 'APPROVED') => {
+    setInquiryDecisionTarget(inquiry);
+    const existingRemarks = inquiry.pmDecisionRemarks || (defaultDecision === 'APPROVED' 
+      ? 'Structural & engineering feasibility verified. Specifications, site requirements, and architectural scope meet Odiliya standards.'
+      : 'Site parameters or design constraints currently incompatible with engineering requirements.');
+    setInquiryDecisionForm({
+      decision: defaultDecision,
+      decisionRemarks: existingRemarks,
+      estimatedBudget: inquiry.pmEstimatedBudget ? String(inquiry.pmEstimatedBudget) : (inquiry.project?.budget ? String(inquiry.project.budget) : '15000000'),
+      estimatedDuration: inquiry.pmEstimatedDuration || '8 - 10 Months',
+    });
+    setInquiryDecisionModalOpen(true);
+  };
+
+  const handleSubmitInquiryDecision = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+    if (!inquiryDecisionTarget) return;
+    setSubmittingInquiryDecision(true);
+    try {
+      const dec = inquiryDecisionForm.decision || 'APPROVED';
+      const defaultRemarks = dec === 'APPROVED'
+        ? 'Structural & engineering feasibility verified. Specifications, site requirements, and architectural scope meet Odiliya standards.'
+        : 'Site parameters or design constraints currently incompatible with engineering requirements.';
+      const remarks = (inquiryDecisionForm.decisionRemarks || '').trim() || defaultRemarks;
+      const budgetVal = dec === 'APPROVED' && inquiryDecisionForm.estimatedBudget ? Number(inquiryDecisionForm.estimatedBudget) : null;
+      const durationVal = dec === 'APPROVED' ? (inquiryDecisionForm.estimatedDuration || '8 - 10 Months').trim() : '';
+
+      const payload = {
+        decision: dec,
+        decisionRemarks: remarks,
+        estimatedBudget: budgetVal,
+        estimatedDuration: durationVal,
+        decidedBy: 'Project Manager',
+      };
+
+      const updatedInq = await submitInquiryDecision(inquiryDecisionTarget.id, payload);
+
+      setInquiries((prev) =>
+        prev.map((item) =>
+          item.id === inquiryDecisionTarget.id
+            ? {
+                ...item,
+                pmDecision: dec,
+                pmDecisionDate: new Date().toISOString(),
+                pmDecisionRemarks: remarks,
+                pmEstimatedBudget: budgetVal,
+                pmEstimatedDuration: durationVal,
+                status: dec,
+                ...(updatedInq && typeof updatedInq === 'object' ? updatedInq : {}),
+              }
+            : item
+        )
+      );
+
+      try {
+        localStorage.setItem('odiliya-inquiries-timestamp', String(Date.now()));
+        window.dispatchEvent(new CustomEvent('odiliya-inquiry-replied', { detail: inquiryDecisionTarget.id }));
+      } catch (_) {}
+
+      report(`Technical feasibility decision [${dec}] registered for "${inquiryDecisionTarget.subject}". Transmitted to Client Manager.`);
+      setInquiryDecisionModalOpen(false);
+      setInquiryDecisionTarget(null);
+      await refresh();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setSubmittingInquiryDecision(false);
     }
   };
 
@@ -527,10 +638,102 @@ export default function ProjectManagerDashboard() {
     }
   };
 
+  const handlePmReplyInquiry = async (e, inquiryId, text) => {
+    if (e) e.preventDefault();
+    if (!text || !text.trim()) return;
+    setSendingPmReply(true);
+    try {
+      await sendInquiryMessage(inquiryId, {
+        senderRole: 'PROJECT_MANAGER',
+        senderName: 'Project Manager',
+        message: text.trim(),
+      });
+      report('Reply sent directly to client.');
+      setPmReplyingInquiryId(null);
+      setPmReplyText('');
+      await refresh();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setSendingPmReply(false);
+    }
+  };
+
+  const handleSendComposeInquiry = async (e) => {
+    e.preventDefault();
+    if (!composeInquiryForm.clientId) {
+      fail(new Error('Please select a client to send the inquiry to.'));
+      return;
+    }
+    if (!composeInquiryForm.subject.trim() || !composeInquiryForm.message.trim()) {
+      fail(new Error('Please provide both subject and message.'));
+      return;
+    }
+    setSendingComposeInquiry(true);
+    try {
+      await createInquiry({
+        client: { id: Number(composeInquiryForm.clientId) },
+        project: composeInquiryForm.projectId ? { id: Number(composeInquiryForm.projectId) } : null,
+        subject: composeInquiryForm.subject.trim(),
+        message: composeInquiryForm.message.trim(),
+        initiatedBy: 'PROJECT_MANAGER',
+      });
+      report('Inquiry sent directly to client.');
+      setComposeInquiryOpen(false);
+      setComposeInquiryForm({ clientId: '', projectId: '', subject: '', message: '' });
+      await refresh();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setSendingComposeInquiry(false);
+    }
+  };
+
+  const handleDeleteInquiry = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this inquiry thread?')) return;
+    try {
+      await deleteInquiry(id);
+      report('Inquiry removed.');
+      await refresh();
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const handleDownloadProjectPdf = async (proj = activeProject) => {
+    if (!proj) {
+      fail(new Error('Please select a project to download the PDF report.'));
+      return;
+    }
+    try {
+      report(`Generating professional PDF dossier for "${proj.name}"...`);
+      const projTasks = tasks.filter((t) => t.project?.id === proj.id);
+      const projMilestones = proj.milestones || [];
+      const projExpenses = expenses.filter((e) => e.project?.id === proj.id);
+      const projEmployees = employees.filter((emp) =>
+        emp.project?.id === proj.id ||
+        (emp.assignedProjects && emp.assignedProjects.some((p) => p.id === proj.id))
+      );
+      const projSpent = spentByProject[proj.id] || 0;
+
+      await generateProjectDetailsPdf(proj, {
+        client: proj.client || clients.find((c) => c.id === proj.clientId),
+        tasks: projTasks,
+        milestones: projMilestones,
+        expenses: projExpenses,
+        employees: projEmployees,
+        spent: projSpent,
+        pmName: 'Project Manager (Operations & Civil Engineering)',
+      });
+      report(`Project dossier for "${proj.name}" downloaded successfully.`);
+    } catch (err) {
+      fail(err);
+    }
+  };
+
   const ProjectSelector = () => (
-    <div style={{ background: '#f8fafc', padding: '12px 18px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+    <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        
         <label htmlFor="pm-project-select" style={{ fontWeight: 700, color: '#1e293b', fontSize: '0.92rem' }}>
           Active Project:
         </label>
@@ -538,7 +741,7 @@ export default function ProjectManagerDashboard() {
           id="pm-project-select"
           value={selectedProjectId}
           onChange={(e) => setSelectedProjectId(e.target.value)}
-          style={{ padding: '6px 12px', borderRadius: '6px', border: '1.5px solid #cbd5e1', background: '#fff', fontWeight: 600, color: '#0f172a', minWidth: '220px' }}
+          style={{ padding: '7px 12px', borderRadius: '6px', border: '1.5px solid #cbd5e1', background: '#fff', fontWeight: 600, color: '#0f172a', minWidth: '220px' }}
         >
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
@@ -549,12 +752,37 @@ export default function ProjectManagerDashboard() {
       </div>
 
       {activeProject && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.82rem', color: '#64748b' }}>
-          <span>Client: <strong style={{ color: '#0f172a' }}>{activeProject.client?.name || 'In-House'}</strong></span>
-          <span>·</span>
-          <span>Budget: <strong style={{ color: '#047857' }}>{formatMoney(activeProject.budget)}</strong></span>
-          <span>·</span>
-          <span>Progress: <strong style={{ color: '#0284c7' }}>{activeProject.progressPercentage || 0}%</strong></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.82rem', color: '#64748b' }}>
+            <span>Client: <strong style={{ color: '#0f172a' }}>{activeProject.client?.name || 'In-House'}</strong></span>
+            <span>·</span>
+            <span>Budget: <strong style={{ color: '#047857' }}>{formatMoney(activeProject.budget)}</strong></span>
+            <span>·</span>
+            <span>Progress: <strong style={{ color: '#0284c7' }}>{activeProject.progressPercentage || 0}%</strong></span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleDownloadProjectPdf(activeProject)}
+            style={{
+              padding: '6px 14px',
+              background: '#047857',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
+              whiteSpace: 'nowrap',
+            }}
+            title="Download executive project details PDF with images, milestones & tasks"
+          >
+            <span>📥</span> Download Project PDF (with Images)
+          </button>
         </div>
       )}
     </div>
@@ -576,6 +804,9 @@ export default function ProjectManagerDashboard() {
         <nav className="pm-tabs">
           <button onClick={() => setTab('overview')} className={tab === 'overview' ? 'active' : ''}>
             Overview
+          </button>
+          <button onClick={() => setTab('inquiries')} className={tab === 'inquiries' ? 'active' : ''}>
+            Client Inquiries {inquiries.length > 0 ? `(${inquiries.filter((i) => i.status === 'PENDING').length > 0 ? `${inquiries.length} · ${inquiries.filter((i) => i.status === 'PENDING').length} Unread` : inquiries.length})` : ''}
           </button>
           <button onClick={() => setTab('requests')} className={tab === 'requests' ? 'active' : ''}>
             Client Requests ({forwardedRequests.filter((r) => r.status === 'FORWARDED_TO_PM').length > 0 ? `${forwardedRequests.length} (${forwardedRequests.filter((r) => r.status === 'FORWARDED_TO_PM').length} Pending)` : forwardedRequests.length})
@@ -626,11 +857,453 @@ export default function ProjectManagerDashboard() {
                 projects={projects}
                 spentByProject={spentByProject}
                 onEdit={editProject}
+                onDownloadPdf={handleDownloadProjectPdf}
                 emptyMessage="No projects yet. Open Projects to create your first project."
               />
             </section>
           </>
         )}
+
+        {/* TAB: CLIENT INQUIRIES (Direct PM-Client Communication) */}
+        {tab === 'inquiries' && (() => {
+          const filteredInquiries = inquiries.filter((inq) => {
+            if (inquiryFilterStatus === 'PENDING' && inq.status !== 'PENDING') return false;
+            if (inquiryFilterStatus === 'ANSWERED' && inq.status !== 'ANSWERED') return false;
+            if (inquiryClientFilter && String(inq.client?.id) !== String(inquiryClientFilter)) return false;
+            if (inquiryProjectFilter && String(inq.project?.id) !== String(inquiryProjectFilter)) return false;
+            if (inquirySearch) {
+              const q = inquirySearch.toLowerCase();
+              const subjectMatch = inq.subject?.toLowerCase().includes(q);
+              const messageMatch = inq.message?.toLowerCase().includes(q);
+              const clientMatch = inq.client?.name?.toLowerCase().includes(q) || inq.client?.email?.toLowerCase().includes(q);
+              const projectMatch = inq.project?.name?.toLowerCase().includes(q);
+              if (!subjectMatch && !messageMatch && !clientMatch && !projectMatch) return false;
+            }
+            return true;
+          });
+
+          return (
+            <section className="pm-card">
+              <div className="pm-card-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h2>Direct Client Inquiries &amp; Communications</h2>
+                  <p>Real-time direct engineering inquiries between property owners, prospective clients, and Project Management.</p>
+                </div>
+                <button
+                  type="button"
+                  className="pm-btn primary"
+                  style={{ background: '#047857', borderColor: '#047857', padding: '0.6rem 1.25rem', fontSize: '0.88rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => {
+                    setComposeInquiryForm({ clientId: '', projectId: '', subject: '', message: '' });
+                    setComposeInquiryOpen(true);
+                  }}
+                >
+                  ✉️ Compose Inquiry to Client
+                </button>
+              </div>
+
+              {/* Status & Search Filter Bar */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', margin: '1rem 0 1.5rem', background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: 'none',
+                      background: inquiryFilterStatus === 'ALL' ? '#047857' : '#e2e8f0',
+                      color: inquiryFilterStatus === 'ALL' ? '#ffffff' : '#475569',
+                    }}
+                    onClick={() => setInquiryFilterStatus('ALL')}
+                  >
+                    All ({inquiries.length})
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: 'none',
+                      background: inquiryFilterStatus === 'PENDING' ? '#b45309' : '#e2e8f0',
+                      color: inquiryFilterStatus === 'PENDING' ? '#ffffff' : '#475569',
+                    }}
+                    onClick={() => setInquiryFilterStatus('PENDING')}
+                  >
+                    Awaiting PM ({inquiries.filter((i) => i.status === 'PENDING').length})
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: 'none',
+                      background: inquiryFilterStatus === 'ANSWERED' ? '#166534' : '#e2e8f0',
+                      color: inquiryFilterStatus === 'ANSWERED' ? '#ffffff' : '#475569',
+                    }}
+                    onClick={() => setInquiryFilterStatus('ANSWERED')}
+                  >
+                    Answered ({inquiries.filter((i) => i.status === 'ANSWERED').length})
+                  </button>
+                </div>
+
+                <div style={{ flex: 1, minWidth: '180px' }}>
+                  <input
+                    type="text"
+                    placeholder="Search subject, client, or message..."
+                    value={inquirySearch}
+                    onChange={(e) => setInquirySearch(e.target.value)}
+                    style={{ width: '100%', padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.84rem' }}
+                  />
+                </div>
+
+                <div style={{ minWidth: '170px' }}>
+                  <select
+                    value={inquiryClientFilter}
+                    onChange={(e) => setInquiryClientFilter(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff' }}
+                  >
+                    <option value="">-- All Clients --</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ minWidth: '170px' }}>
+                  <select
+                    value={inquiryProjectFilter}
+                    onChange={(e) => setInquiryProjectFilter(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff' }}
+                  >
+                    <option value="">-- All Projects --</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Inquiry List */}
+              {filteredInquiries.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                  <h3>No Inquiries Found</h3>
+                  <p>When clients send questions or inquiries, they will arrive here directly for you to review and answer.</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {filteredInquiries.map((inq) => {
+                    const isPending = inq.status === 'PENDING';
+                    const isReplying = pmReplyingInquiryId === inq.id;
+                    const isClientInitiated = inq.initiatedBy === 'CLIENT';
+
+                    return (
+                      <div
+                        key={inq.id}
+                        style={{
+                          background: '#ffffff',
+                          border: isPending ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                          borderRadius: '10px',
+                          padding: '1.35rem',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                        }}
+                      >
+                        {/* Header Row */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                              <strong style={{ fontSize: '1.15rem', color: '#0f172a' }}>{inq.subject}</strong>
+                              <span
+                                style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '12px',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 700,
+                                  background: isPending ? '#fef3c7' : '#dcfce7',
+                                  color: isPending ? '#b45309' : '#166534',
+                                  border: `1px solid ${isPending ? '#fde68a' : '#bbf7d0'}`,
+                                }}
+                              >
+                                {isPending ? 'Action Needed (Awaiting Your Reply)' : 'Answered / In Discussion'}
+                              </span>
+                            </div>
+
+                            <p style={{ margin: 0, fontSize: '0.84rem', color: '#64748b' }}>
+                              Client: <strong style={{ color: '#0f172a' }}>{inq.client?.name || 'Client'}</strong> ({inq.client?.email || 'N/A'}{inq.client?.phone ? `, ${inq.client.phone}` : ''}) &nbsp;•&nbsp;
+                              Started {formatDate(inq.createdAt)} {isClientInitiated ? 'by Client' : 'by You'}
+                              {inq.project && (
+                                <span style={{ marginLeft: '6px', color: '#0369a1', fontWeight: 600 }}>
+                                  · Project: {inq.project.name}
+                                </span>
+                              )}
+                              {inq.design && (
+                                <span style={{ marginLeft: '6px', color: '#7c3aed', fontWeight: 600 }}>
+                                  · Design Model: {inq.design.name}
+                                </span>
+                              )}
+                            </p>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteInquiry(inq.id)}
+                              style={{ padding: '4px 10px', background: '#fff', color: '#ef4444', border: '1px solid #fca5a5', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer', fontWeight: 600 }}
+                              title="Delete inquiry thread"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Thread View */}
+                        <div style={{ marginTop: '0.75rem' }}>
+                          <InquiryThread inquiry={inq} viewerRole="PROJECT_MANAGER" />
+                        </div>
+
+                        {/* Technical Feasibility & PM Decision Box */}
+                        <div style={{
+                          marginTop: '0.85rem',
+                          padding: '1rem',
+                          background: inq.pmDecision === 'APPROVED' ? '#f0fdf4' : inq.pmDecision === 'REJECTED' ? '#fef2f2' : '#fffbeb',
+                          borderRadius: '8px',
+                          border: `1.5px solid ${inq.pmDecision === 'APPROVED' ? '#86efac' : inq.pmDecision === 'REJECTED' ? '#fca5a5' : '#fde68a'}`,
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 800,
+                                  background: inq.pmDecision === 'APPROVED' ? '#dcfce7' : inq.pmDecision === 'REJECTED' ? '#fee2e2' : '#fef3c7',
+                                  color: inq.pmDecision === 'APPROVED' ? '#166534' : inq.pmDecision === 'REJECTED' ? '#991b1b' : '#b45309',
+                                }}>
+                                  {inq.pmDecision === 'APPROVED' ? '✓ FEASIBILITY APPROVED' : inq.pmDecision === 'REJECTED' ? '✕ FEASIBILITY REJECTED' : '⏳ TECHNICAL DECISION PENDING'}
+                                </span>
+                                {inq.contractGenerated && (
+                                  <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.74rem', fontWeight: 700, background: '#e0e7ff', color: '#3730a3' }}>
+                                    📝 Contract Agreement Linked
+                                  </span>
+                                )}
+                              </div>
+                              <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#475569' }}>
+                                {inq.pmDecision === 'APPROVED'
+                                  ? 'Technical assessment passed. Transmitted to Client Manager to draft and sign contract agreement with client.'
+                                  : inq.pmDecision === 'REJECTED'
+                                  ? 'Project scope rejected by Project Manager. Client and Client Manager notified.'
+                                  : 'Review engineering requirements and record official PM decision (Approve or Reject).'}
+                              </p>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              {inq.pmDecision === 'APPROVED' ? (
+                                <span
+                                  style={{
+                                    padding: '6px 14px',
+                                    background: '#dcfce7',
+                                    color: '#166534',
+                                    border: '1px solid #86efac',
+                                    borderRadius: '6px',
+                                    fontWeight: 700,
+                                    fontSize: '0.82rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                  }}
+                                >
+                                  ✓ Feasibility Approved &amp; Transmitted
+                                </span>
+                              ) : inq.pmDecision === 'REJECTED' ? (
+                                <span
+                                  style={{
+                                    padding: '6px 14px',
+                                    background: '#fee2e2',
+                                    color: '#991b1b',
+                                    border: '1px solid #fca5a5',
+                                    borderRadius: '6px',
+                                    fontWeight: 700,
+                                    fontSize: '0.82rem',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                  }}
+                                >
+                                  ✕ Feasibility Rejected
+                                </span>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenInquiryDecisionModal(inq, 'APPROVED')}
+                                    style={{
+                                      padding: '6px 14px',
+                                      background: '#16a34a',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      fontWeight: 700,
+                                      fontSize: '0.8rem',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                    }}
+                                  >
+                                    <span>✓</span> Approve Feasibility
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenInquiryDecisionModal(inq, 'REJECTED')}
+                                    style={{
+                                      padding: '6px 14px',
+                                      background: '#ffffff',
+                                      color: '#dc2626',
+                                      border: '1px solid #f87171',
+                                      borderRadius: '6px',
+                                      fontWeight: 700,
+                                      fontSize: '0.8rem',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                    }}
+                                  >
+                                    <span>✕</span> Reject Inquiry
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {inq.pmDecisionRemarks && (
+                            <div style={{ marginTop: '8px', padding: '8px 10px', background: 'rgba(255,255,255,0.7)', borderRadius: '6px', fontSize: '0.82rem', color: '#1e293b' }}>
+                              <strong>PM Technical Remarks:</strong> {inq.pmDecisionRemarks}
+                            </div>
+                          )}
+
+                          {(inq.pmEstimatedBudget || inq.pmEstimatedDuration) && (
+                            <div style={{ marginTop: '6px', display: 'flex', gap: '16px', fontSize: '0.8rem', color: '#047857', fontWeight: 600 }}>
+                              {inq.pmEstimatedBudget && <span>💰 Estimated Cost: {formatMoney(inq.pmEstimatedBudget)}</span>}
+                              {inq.pmEstimatedDuration && <span>⏱ Duration: {inq.pmEstimatedDuration}</span>}
+                            </div>
+                          )}
+                        </div>
+
+                        {inq.attachmentData && (
+                          <div style={{ margin: '0.5rem 0' }}>
+                            <a href={inq.attachmentData} download={inq.attachmentName || 'client-attachment'} className="pm-btn secondary" style={{ display: 'inline-flex', fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}>
+                              📎 View Attached File: {inq.attachmentName || 'Attachment'}
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Quick Response Section */}
+                        <div style={{ marginTop: '1rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '6px' }}>
+                            <label style={{ fontWeight: 700, fontSize: '0.84rem', color: '#047857' }}>
+                              Direct Reply to Client:
+                            </label>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', background: '#e2e8f0', border: 'none', cursor: 'pointer', color: '#334155' }}
+                                onClick={() => {
+                                  setPmReplyingInquiryId(inq.id);
+                                  setPmReplyText('We have reviewed your inquiry and our site engineering team is verifying the structural specifications.');
+                                }}
+                              >
+                                Template: Reviewing specs
+                              </button>
+                              <button
+                                type="button"
+                                style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', background: '#e2e8f0', border: 'none', cursor: 'pointer', color: '#334155' }}
+                                onClick={() => {
+                                  setPmReplyingInquiryId(inq.id);
+                                  setPmReplyText('Thank you for reaching out. We will inspect the site progress and provide updated photos and milestone status shortly.');
+                                }}
+                              >
+                                Template: Site inspection
+                              </button>
+                              <button
+                                type="button"
+                                style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: '4px', background: '#e2e8f0', border: 'none', cursor: 'pointer', color: '#334155' }}
+                                onClick={() => {
+                                  setPmReplyingInquiryId(inq.id);
+                                  setPmReplyText('We have scheduled the on-site technical consultation for your project as requested.');
+                                }}
+                              >
+                                Template: Consultation scheduled
+                              </button>
+                            </div>
+                          </div>
+
+                          <textarea
+                            rows={3}
+                            placeholder="Type your response directly to the client..."
+                            value={isReplying ? pmReplyText : ''}
+                            onFocus={() => {
+                              if (pmReplyingInquiryId !== inq.id) {
+                                setPmReplyingInquiryId(inq.id);
+                                setPmReplyText('');
+                              }
+                            }}
+                            onChange={(e) => {
+                              setPmReplyingInquiryId(inq.id);
+                              setPmReplyText(e.target.value);
+                            }}
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.88rem', boxSizing: 'border-box' }}
+                          />
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.6rem', gap: '8px' }}>
+                            {isReplying && pmReplyText && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPmReplyingInquiryId(null);
+                                  setPmReplyText('');
+                                }}
+                                style={{ padding: '6px 14px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.82rem', cursor: 'pointer' }}
+                              >
+                                Clear
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={sendingPmReply || !isReplying || !pmReplyText.trim()}
+                              onClick={(e) => handlePmReplyInquiry(e, inq.id, pmReplyText)}
+                              style={{
+                                padding: '6px 18px',
+                                background: isReplying && pmReplyText.trim() ? '#047857' : '#9ca3af',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontWeight: 700,
+                                fontSize: '0.84rem',
+                                cursor: isReplying && pmReplyText.trim() ? 'pointer' : 'not-allowed',
+                              }}
+                            >
+                              {sendingPmReply && isReplying ? 'Sending Reply...' : 'Send Reply Directly to Client'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })()}
 
         {/* TAB: CLIENT PROJECT REQUESTS (Forwarded by Client Manager) */}
         {tab === 'requests' && (
@@ -878,7 +1551,9 @@ export default function ProjectManagerDashboard() {
                   <select
                     value={projectForm.category}
                     onChange={(e) => setProjectForm({ ...projectForm, category: e.target.value })}
+                    required
                   >
+                    <option value="">-- Select Property Type --</option>
                     <option value="RESIDENCIES">Residencies</option>
                     <option value="APARTMENTS">Apartments</option>
                     <option value="LANDS">Land / Plot</option>
@@ -888,7 +1563,7 @@ export default function ProjectManagerDashboard() {
                   value={projectForm.clientId}
                   onChange={(e) => setProjectForm({ ...projectForm, clientId: e.target.value })}
                 >
-                  <option value="">No client assigned</option>
+                  <option value="">-- Choose Assigned Client (Optional) --</option>
                   {clients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.name} ({client.email})
@@ -1012,9 +1687,11 @@ export default function ProjectManagerDashboard() {
                   <select
                     value={projectForm.status}
                     onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value })}
+                    required
                   >
+                    <option value="">-- Select Status --</option>
                     {statuses.map((status) => (
-                      <option key={status}>{status}</option>
+                      <option key={status} value={status}>{status.replace('_', ' ')}</option>
                     ))}
                   </select>
                 </label>
@@ -1041,15 +1718,82 @@ export default function ProjectManagerDashboard() {
                     </button>
                   </div>
                 )}
+                {editingProject && (
+                  <div style={{ marginTop: '0.85rem', paddingTop: '0.85rem', borderTop: '1px solid #e2e8f0' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadProjectPdf(editingProject)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 16px',
+                        background: '#ecfdf5',
+                        color: '#047857',
+                        border: '1.5px solid #10b981',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        fontSize: '0.86rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      📄 Download Project Dossier (PDF)
+                    </button>
+                  </div>
+                )}
               </form>
             </FormCard>
             <FormCard title="All projects">
-              <ProjectTable
-                projects={projects}
-                spentByProject={spentByProject}
-                onEdit={editProject}
-                emptyMessage="No projects have been created."
-              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#334155' }}>Filter by category:</label>
+                  <select
+                    value={projectFilterCategory}
+                    onChange={(e) => setProjectFilterCategory(e.target.value)}
+                    style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
+                  >
+                    <option value="ALL">All Categories ({projects.length})</option>
+                    <option value="RESIDENCIES">Residencies ({projects.filter((p) => p.category === 'RESIDENCIES').length})</option>
+                    <option value="APARTMENTS">Apartments ({projects.filter((p) => p.category === 'APARTMENTS').length})</option>
+                    <option value="LANDS">Lands &amp; Plots ({projects.filter((p) => p.category === 'LANDS').length})</option>
+                  </select>
+                </div>
+                <div style={{ flex: '1 1 180px', maxWidth: '240px' }}>
+                  <input
+                    type="text"
+                    placeholder="Search projects..."
+                    value={projectSearchQuery}
+                    onChange={(e) => setProjectSearchQuery(e.target.value)}
+                    style={{ width: '100%', padding: '5px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
+                  />
+                </div>
+              </div>
+
+              {(() => {
+                const filteredProjects = projects.filter((p) => {
+                  if (projectFilterCategory !== 'ALL' && p.category !== projectFilterCategory) return false;
+                  if (projectSearchQuery.trim()) {
+                    const q = projectSearchQuery.toLowerCase();
+                    const nameMatch = p.name?.toLowerCase().includes(q);
+                    const clientMatch = p.client?.name?.toLowerCase().includes(q);
+                    const locMatch = p.location?.toLowerCase().includes(q);
+                    if (!nameMatch && !clientMatch && !locMatch) return false;
+                  }
+                  return true;
+                });
+
+                return (
+                  <ProjectTable
+                    projects={filteredProjects}
+                    spentByProject={spentByProject}
+                    onEdit={editProject}
+                    onDownloadPdf={handleDownloadProjectPdf}
+                    emptyMessage="No projects match the current filter."
+                  />
+                );
+              })()}
             </FormCard>
           </section>
         )}
@@ -1342,7 +2086,7 @@ export default function ProjectManagerDashboard() {
                       value={taskForm.assignedEmployeeId}
                       onChange={(e) => setTaskForm({ ...taskForm, assignedEmployeeId: e.target.value })}
                     >
-                      <option value="">Unassigned</option>
+                      <option value="">-- Select Employee (Optional) --</option>
                       {employees.map((employee) => (
                         <option key={employee.id} value={employee.id}>
                           {employee.name} ({employee.role || employee.position || 'Staff'})
@@ -1607,6 +2351,28 @@ export default function ProjectManagerDashboard() {
 
                   <button
                     type="button"
+                    onClick={() => handleDownloadProjectPdf(activeProject)}
+                    style={{
+                      padding: '9px 16px',
+                      background: '#065f46',
+                      color: '#ffffff',
+                      border: '1px solid #34d399',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                    }}
+                    title="Download active project report with images, milestones & tasks"
+                  >
+                    <span>📄</span> Download Project Dossier (PDF)
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => {
                       exportCsv(
                         tasks.map((t) => ({
@@ -1642,6 +2408,60 @@ export default function ProjectManagerDashboard() {
               </div>
             </div>
 
+            {/* Featured Executive Project Report Card (PDF with Images) */}
+            <div style={{ background: 'linear-gradient(135deg, #064e3b 0%, #047857 100%)', borderRadius: '14px', padding: '24px', color: '#ffffff', marginBottom: '24px', boxShadow: '0 4px 14px rgba(4, 120, 87, 0.25)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div style={{ flex: '1 1 400px' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 700, marginBottom: '8px' }}>
+                    <span>⭐</span> OFFICIAL EXECUTIVE DOSSIER
+                  </div>
+                  <h2 style={{ margin: '0 0 6px', fontSize: '1.4rem', color: '#ffffff' }}>
+                    {activeProject?.name || 'Project'} — Executive Audit Dossier (PDF)
+                  </h2>
+                  <p style={{ margin: '0 0 14px', fontSize: '0.85rem', color: '#d1fae5', lineHeight: 1.5 }}>
+                    Generate a publication-grade, verified PDF engineering report with high-resolution site images, architectural specifications, milestone completion progress, task execution schedule, assigned personnel roster, and itemized financial expenditure breakdown.
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '0.8rem', color: '#a7f3d0' }}>
+                    <span>📍 {activeProject?.location || 'Site Location'}</span>
+                    <span>•</span>
+                    <span>Client: <b>{activeProject?.client?.name || 'In-House Development'}</b></span>
+                    <span>•</span>
+                    <span>Budget: <b>{formatMoney(activeProject?.budget)}</b></span>
+                    <span>•</span>
+                    <span>Progress: <b>{activeProject?.progressPercentage || 0}%</b></span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '230px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadProjectPdf(activeProject)}
+                    style={{
+                      padding: '12px 22px',
+                      background: '#fbbf24',
+                      color: '#78350f',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 800,
+                      fontSize: '0.9rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                    }}
+                  >
+                    <span>📥</span> Download Project PDF (with Images)
+                  </button>
+                  <small style={{ color: '#d1fae5', textAlign: 'center', fontSize: '0.74rem' }}>
+                    Includes architectural visual &amp; corporate seal
+                  </small>
+                </div>
+              </div>
+            </div>
+
             {/* Document Cards Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
               {/* Card 1: Project Blueprints & Technical Drawings */}
@@ -1650,7 +2470,7 @@ export default function ProjectManagerDashboard() {
                   Architectural & Engineering Drawings
                 </h3>
                 <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
-                  Download structural designs, MEP blueprints, and foundation drawings for <b>{activeProject?.name || 'Selected Project'}</b>.
+                  Structural designs, MEP blueprints, and foundation drawings for <b>{activeProject?.name || 'Selected Project'}</b>.
                 </p>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1660,31 +2480,11 @@ export default function ProjectManagerDashboard() {
                     { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_MEP_Electrical_Plumbing_Schematics.pdf`, size: '3.3 MB', desc: 'Mechanical, electrical & piping conduit layout' },
                     { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Soil_Investigation_Foundation_Report.pdf`, size: '1.2 MB', desc: 'Geotechnical soil report & piling foundation' },
                   ].map((doc) => (
-                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
-                      <div style={{ flex: 1, marginRight: '10px' }}>
-                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
-                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.86rem' }}>📄 {doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.76rem', marginTop: '2px' }}>{doc.desc} • {doc.size}</div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => downloadFile(null, doc.name)}
-                        style={{
-                          padding: '6px 12px',
-                          background: '#ecfdf5',
-                          color: '#047857',
-                          border: '1px solid #a7f3d0',
-                          borderRadius: '6px',
-                          fontWeight: 700,
-                          fontSize: '0.78rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        Download
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -1706,31 +2506,11 @@ export default function ProjectManagerDashboard() {
                     { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Environmental_Impact_Clearance.pdf`, size: '640 KB', desc: 'Central Environmental Authority (CEA) clearance certificate' },
                     { name: `${(activeProject?.name || 'Project').replace(/\s+/g, '_')}_Fire_Safety_Department_Approval.pdf`, size: '480 KB', desc: 'Civil defense fire safety & hydrant installation pass' },
                   ].map((doc) => (
-                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
-                      <div style={{ flex: 1, marginRight: '10px' }}>
-                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
-                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
+                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.86rem' }}>📑 {doc.name}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.76rem', marginTop: '2px' }}>{doc.desc} • {doc.size}</div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => downloadFile(null, doc.name)}
-                        style={{
-                          padding: '6px 12px',
-                          background: '#ecfdf5',
-                          color: '#047857',
-                          border: '1px solid #a7f3d0',
-                          borderRadius: '6px',
-                          fontWeight: 700,
-                          fontSize: '0.78rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        Download
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -1880,6 +2660,7 @@ export default function ProjectManagerDashboard() {
                       onChange={(e) => setStartProjectForm({ ...startProjectForm, category: e.target.value })}
                       required
                     >
+                      <option value="">-- Select Property Category --</option>
                       <option value="RESIDENCIES">Residencies</option>
                       <option value="LANDS">Lands &amp; Plots</option>
                       <option value="APARTMENTS">Apartments</option>
@@ -1947,6 +2728,284 @@ export default function ProjectManagerDashboard() {
                   </button>
                   <button type="submit" className="btn-solid-green" disabled={startingProject} style={{ background: '#16a34a' }}>
                     {startingProject ? 'Starting Project...' : 'Initialize Project & Assign Client'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* PM INQUIRY TECHNICAL DECISION MODAL */}
+        {inquiryDecisionModalOpen && inquiryDecisionTarget && (
+          <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
+            <div className="light-modal-box" style={{ maxWidth: '640px', width: '95%', padding: '1.75rem', borderRadius: '14px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>ENGINEERING FEASIBILITY &amp; TECHNICAL DECISION</span>
+                  <h3 style={{ margin: '0.2rem 0 0', color: inquiryDecisionForm.decision === 'APPROVED' ? '#166534' : '#dc2626' }}>
+                    {inquiryDecisionForm.decision === 'APPROVED' ? 'Approve Technical Feasibility' : 'Reject Inquiry Assessment'}
+                  </h3>
+                </div>
+                <button type="button" onClick={() => { setInquiryDecisionModalOpen(false); setInquiryDecisionTarget(null); }}>×</button>
+              </div>
+
+              <form onSubmit={handleSubmitInquiryDecision} style={{ marginTop: '1.25rem' }}>
+                <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #e2e8f0', fontSize: '0.88rem' }}>
+                  <p style={{ margin: '0 0 0.35rem' }}>
+                    <strong>Client:</strong> {inquiryDecisionTarget.client?.name} ({inquiryDecisionTarget.client?.email || 'N/A'}{inquiryDecisionTarget.client?.phone ? `, ${inquiryDecisionTarget.client.phone}` : ''})
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    <strong>Subject:</strong> {inquiryDecisionTarget.subject}
+                    {inquiryDecisionTarget.project && <span> &bull; Project: <b>{inquiryDecisionTarget.project.name}</b></span>}
+                    {inquiryDecisionTarget.design && <span> &bull; Design Model: <b>{inquiryDecisionTarget.design.name}</b></span>}
+                  </p>
+                </div>
+
+                <div className="form-input-box">
+                  <label style={{ fontWeight: 700, marginBottom: '6px', display: 'block' }}>Official Decision *</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '4px' }}>
+                    <div
+                      onClick={() => {
+                        const newRemarks = (!inquiryDecisionForm.decisionRemarks || inquiryDecisionForm.decisionRemarks.includes('Site parameters or design constraints'))
+                          ? 'Structural & engineering feasibility verified. Specifications, site requirements, and architectural scope meet Odiliya standards.'
+                          : inquiryDecisionForm.decisionRemarks;
+                        setInquiryDecisionForm({
+                          ...inquiryDecisionForm,
+                          decision: 'APPROVED',
+                          decisionRemarks: newRemarks,
+                        });
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        fontSize: '0.88rem',
+                        border: inquiryDecisionForm.decision === 'APPROVED' ? '2px solid #16a34a' : '1.5px solid #cbd5e1',
+                        background: inquiryDecisionForm.decision === 'APPROVED' ? '#ecfdf5' : '#ffffff',
+                        color: inquiryDecisionForm.decision === 'APPROVED' ? '#15803d' : '#334155',
+                        boxShadow: inquiryDecisionForm.decision === 'APPROVED' ? '0 2px 6px rgba(22,163,74,0.15)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="pmDecisionChoice"
+                        value="APPROVED"
+                        checked={inquiryDecisionForm.decision === 'APPROVED'}
+                        onChange={() => {
+                          const newRemarks = (!inquiryDecisionForm.decisionRemarks || inquiryDecisionForm.decisionRemarks.includes('Site parameters or design constraints'))
+                            ? 'Structural & engineering feasibility verified. Specifications, site requirements, and architectural scope meet Odiliya standards.'
+                            : inquiryDecisionForm.decisionRemarks;
+                          setInquiryDecisionForm({
+                            ...inquiryDecisionForm,
+                            decision: 'APPROVED',
+                            decisionRemarks: newRemarks,
+                          });
+                        }}
+                        style={{ accentColor: '#16a34a', width: '18px', height: '18px', cursor: 'pointer' }}
+                      />
+                      <span>✓ APPROVE (Feasible &amp; Ready for Contract)</span>
+                    </div>
+
+                    <div
+                      onClick={() => {
+                        const newRemarks = (!inquiryDecisionForm.decisionRemarks || inquiryDecisionForm.decisionRemarks.includes('Structural & engineering feasibility'))
+                          ? 'Site parameters or design constraints currently incompatible with engineering requirements.'
+                          : inquiryDecisionForm.decisionRemarks;
+                        setInquiryDecisionForm({
+                          ...inquiryDecisionForm,
+                          decision: 'REJECTED',
+                          decisionRemarks: newRemarks,
+                        });
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        fontSize: '0.88rem',
+                        border: inquiryDecisionForm.decision === 'REJECTED' ? '2px solid #dc2626' : '1.5px solid #cbd5e1',
+                        background: inquiryDecisionForm.decision === 'REJECTED' ? '#fef2f2' : '#ffffff',
+                        color: inquiryDecisionForm.decision === 'REJECTED' ? '#b91c1c' : '#334155',
+                        boxShadow: inquiryDecisionForm.decision === 'REJECTED' ? '0 2px 6px rgba(220,38,38,0.15)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="pmDecisionChoice"
+                        value="REJECTED"
+                        checked={inquiryDecisionForm.decision === 'REJECTED'}
+                        onChange={() => {
+                          const newRemarks = (!inquiryDecisionForm.decisionRemarks || inquiryDecisionForm.decisionRemarks.includes('Structural & engineering feasibility'))
+                            ? 'Site parameters or design constraints currently incompatible with engineering requirements.'
+                            : inquiryDecisionForm.decisionRemarks;
+                          setInquiryDecisionForm({
+                            ...inquiryDecisionForm,
+                            decision: 'REJECTED',
+                            decisionRemarks: newRemarks,
+                          });
+                        }}
+                        style={{ accentColor: '#dc2626', width: '18px', height: '18px', cursor: 'pointer' }}
+                      />
+                      <span>✕ REJECT (Not Feasible / Incompatible)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '0.85rem' }}>
+                  <label>Engineering Evaluation &amp; Decision Remarks *</label>
+                  <textarea
+                    rows={4}
+                    value={inquiryDecisionForm.decisionRemarks}
+                    onChange={(e) => setInquiryDecisionForm({ ...inquiryDecisionForm, decisionRemarks: e.target.value })}
+                    placeholder="Detail the technical reasoning, structural suitability, soil compatibility, site clearance comments, or rejection rationale..."
+                    required
+                  />
+                </div>
+
+                {inquiryDecisionForm.decision === 'APPROVED' && (
+                  <div className="form-grid-2" style={{ marginTop: '0.85rem' }}>
+                    <div className="form-input-box">
+                      <label>Estimated Construction Budget (LKR)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="10000"
+                        placeholder="e.g. 25000000"
+                        value={inquiryDecisionForm.estimatedBudget}
+                        onChange={(e) => setInquiryDecisionForm({ ...inquiryDecisionForm, estimatedBudget: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="form-input-box">
+                      <label>Estimated Construction Duration</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 8 - 10 Months"
+                        value={inquiryDecisionForm.estimatedDuration}
+                        onChange={(e) => setInquiryDecisionForm({ ...inquiryDecisionForm, estimatedDuration: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ marginTop: '0.85rem', padding: '0.75rem', background: inquiryDecisionForm.decision === 'APPROVED' ? '#ecfdf5' : '#fef2f2', borderRadius: '8px', border: `1px solid ${inquiryDecisionForm.decision === 'APPROVED' ? '#a7f3d0' : '#fecaca'}`, fontSize: '0.82rem', color: inquiryDecisionForm.decision === 'APPROVED' ? '#065f46' : '#991b1b' }}>
+                  {inquiryDecisionForm.decision === 'APPROVED'
+                    ? '✓ Upon approval, this decision is automatically transmitted to the Client Manager so they can draft and sign the formal construction contract agreement with the client.'
+                    : '✕ Upon rejection, the client and Client Manager will receive an official notification with your technical rationale.'}
+                </div>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => { setInquiryDecisionModalOpen(false); setInquiryDecisionTarget(null); }}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-solid-green"
+                    disabled={submittingInquiryDecision}
+                    style={{
+                      background: inquiryDecisionForm.decision === 'APPROVED' ? '#16a34a' : '#dc2626',
+                      borderColor: inquiryDecisionForm.decision === 'APPROVED' ? '#16a34a' : '#dc2626',
+                      padding: '8px 20px',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                    onClick={handleSubmitInquiryDecision}
+                  >
+                    {submittingInquiryDecision ? 'Submitting Decision...' : `Submit Official Decision: [${inquiryDecisionForm.decision}]`}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* COMPOSE DIRECT INQUIRY TO CLIENT MODAL */}
+        {composeInquiryOpen && (
+          <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
+            <div className="light-modal-box" style={{ maxWidth: '620px', width: '95%', padding: '1.75rem', borderRadius: '14px' }}>
+              <div className="modal-head-row">
+                <div>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>DIRECT CLIENT COMMUNICATION</span>
+                  <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Send Inquiry to Client</h3>
+                </div>
+                <button type="button" onClick={() => setComposeInquiryOpen(false)}>×</button>
+              </div>
+
+              <form onSubmit={handleSendComposeInquiry} style={{ marginTop: '1.25rem' }}>
+                <div className="form-grid-2">
+                  <div className="form-input-box">
+                    <label>Client *</label>
+                    <select
+                      value={composeInquiryForm.clientId}
+                      onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, clientId: e.target.value })}
+                      required
+                    >
+                      <option value="">-- Select Client --</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-input-box">
+                    <label>Related Project (Optional)</label>
+                    <select
+                      value={composeInquiryForm.projectId}
+                      onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, projectId: e.target.value })}
+                    >
+                      <option value="">-- Choose Project (Optional) --</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                  <label>Subject *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Milestone Inspection & Material Confirmation"
+                    value={composeInquiryForm.subject}
+                    onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, subject: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-input-box" style={{ marginTop: '1rem' }}>
+                  <label>Message *</label>
+                  <textarea
+                    rows={5}
+                    placeholder="Write your inquiry or engineering update directly to the client..."
+                    value={composeInquiryForm.message}
+                    onChange={(e) => setComposeInquiryForm({ ...composeInquiryForm, message: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.6rem', fontSize: '0.8rem' }}>
+                  The client will receive this message directly in their Client Portal and can reply back to you in this thread.
+                </small>
+
+                <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
+                  <button type="button" className="btn-outline-green" onClick={() => setComposeInquiryOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-solid-green" disabled={sendingComposeInquiry}>
+                    {sendingComposeInquiry ? 'Sending...' : 'Send Inquiry to Client'}
                   </button>
                 </div>
               </form>
@@ -2046,7 +3105,7 @@ function TaskTable({ tasks, completeTask }) {
   );
 }
 
-function ProjectTable({ projects, spentByProject, onEdit, emptyMessage }) {
+function ProjectTable({ projects, spentByProject, onEdit, onDownloadPdf, emptyMessage }) {
   return !projects.length ? (
     <EmptyState message={emptyMessage} />
   ) : (
@@ -2057,18 +3116,29 @@ function ProjectTable({ projects, spentByProject, onEdit, emptyMessage }) {
             <th>Project</th>
             <th>Client</th>
             <th>Dates</th>
-            <th>Budget / spent</th>
+            <th>Budget / Spent</th>
             <th>Progress</th>
             <th>Status</th>
-            <th />
+            <th style={{ textAlign: 'center' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {projects.map((project) => (
             <tr key={project.id}>
               <td>
-                <strong>{project.name}</strong>
-                <small>{project.description || 'No description added'}</small>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {project.imageUrl && (
+                    <img
+                      src={project.imageUrl}
+                      alt={project.name}
+                      style={{ width: '38px', height: '38px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #cbd5e1', flexShrink: 0 }}
+                    />
+                  )}
+                  <div>
+                    <strong>{project.name}</strong>
+                    <small>{project.location || project.category || 'Odiliya Project'}</small>
+                  </div>
+                </div>
               </td>
               <td>{project.client?.name || <span style={{ color: '#9ca3af' }}>Unassigned</span>}</td>
               <td>
@@ -2087,9 +3157,39 @@ function ProjectTable({ projects, spentByProject, onEdit, emptyMessage }) {
                 <Status value={project.status} />
               </td>
               <td>
-                <button className="pm-text-button" onClick={() => onEdit(project)}>
-                  Edit
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    className="pm-text-button"
+                    onClick={() => onEdit(project)}
+                    title="Edit project parameters"
+                  >
+                    Edit
+                  </button>
+                  {onDownloadPdf && (
+                    <button
+                      type="button"
+                      onClick={() => onDownloadPdf(project)}
+                      style={{
+                        padding: '4px 10px',
+                        background: '#ecfdf5',
+                        color: '#047857',
+                        border: '1px solid #a7f3d0',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                      }}
+                      title="Download executive project report (PDF with images)"
+                    >
+                      <span>📄</span> PDF
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

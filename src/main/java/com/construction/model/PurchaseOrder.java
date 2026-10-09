@@ -8,6 +8,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -24,8 +26,11 @@ public class PurchaseOrder {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "po_number", unique = true, nullable = false)
+    @Column(name = "po_number")
     private String poNumber;
+
+    @Column(name = "order_number")
+    private String orderNumber;
 
     @NotBlank(message = "Supplier name is required")
     @Column(nullable = false)
@@ -70,6 +75,7 @@ public class PurchaseOrder {
 
     public PurchaseOrder(String poNumber, String supplier, Material material, Double quantity, BigDecimal unitPrice, LocalDate expectedDeliveryDate, String notes, String createdBy) {
         this.poNumber = poNumber;
+        this.orderNumber = poNumber;
         this.supplier = supplier;
         this.material = material;
         this.quantity = quantity;
@@ -80,6 +86,19 @@ public class PurchaseOrder {
         this.createdBy = createdBy;
         this.orderDate = LocalDate.now();
         this.status = "ORDERED";
+    }
+
+    @PrePersist
+    @PreUpdate
+    public void syncOrderAndPoNumber() {
+        if (this.poNumber == null || this.poNumber.isBlank()) {
+            if (this.orderNumber != null && !this.orderNumber.isBlank()) {
+                this.poNumber = this.orderNumber;
+            }
+        }
+        if (this.orderNumber == null || this.orderNumber.isBlank()) {
+            this.orderNumber = this.poNumber;
+        }
     }
 
     public Long getId() {
@@ -96,6 +115,20 @@ public class PurchaseOrder {
 
     public void setPoNumber(String poNumber) {
         this.poNumber = poNumber;
+        if (this.orderNumber == null || this.orderNumber.isBlank()) {
+            this.orderNumber = poNumber;
+        }
+    }
+
+    public String getOrderNumber() {
+        return orderNumber;
+    }
+
+    public void setOrderNumber(String orderNumber) {
+        this.orderNumber = orderNumber;
+        if (this.poNumber == null || this.poNumber.isBlank()) {
+            this.poNumber = orderNumber;
+        }
     }
 
     public String getSupplier() {

@@ -55,7 +55,34 @@ public class ClientInquiryController {
         return ResponseEntity.ok(inquiryService.respond(id, responseText, respondedBy));
     }
 
-    /** Body: { "senderRole": "CLIENT" | "CLIENT_MANAGER", "senderName": "...", "message": "..." } */
+    @PutMapping("/{id}/decision")
+    public ResponseEntity<ClientInquiry> submitDecision(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body) {
+        String decision = (String) body.get("decision");
+        String decisionRemarks = (String) body.get("decisionRemarks");
+        String duration = (String) body.get("estimatedDuration");
+        String decidedBy = (String) body.get("decidedBy");
+
+        java.math.BigDecimal budget = null;
+        if (body.get("estimatedBudget") != null) {
+            try {
+                budget = new java.math.BigDecimal(body.get("estimatedBudget").toString());
+            } catch (Exception ignored) {}
+        }
+
+        return ResponseEntity.ok(inquiryService.submitDecision(id, decision, decisionRemarks, budget, duration, decidedBy));
+    }
+
+    @PutMapping("/{id}/contract-linked")
+    public ResponseEntity<ClientInquiry> markContractLinked(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body) {
+        Long contractId = body.get("contractId") != null ? Long.valueOf(body.get("contractId").toString()) : null;
+        return ResponseEntity.ok(inquiryService.markContractGenerated(id, contractId));
+    }
+
+    /** Body: { "senderRole": "CLIENT" | "CLIENT_MANAGER" | "PROJECT_MANAGER", "senderName": "...", "message": "..." } */
     @PostMapping("/{id}/messages")
     public ResponseEntity<ClientInquiry> addMessage(
             @PathVariable Long id,

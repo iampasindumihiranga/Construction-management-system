@@ -28,6 +28,7 @@ import {
   createDownPayment,
   getPaymentSummary,
   getBankDetails,
+  getContracts,
   formatDate,
   formatMoney,
 } from '../services/api';
@@ -111,6 +112,7 @@ export default function ClientDashboard() {
   const [selectedDesign, setSelectedDesign] = useState(null);
   const [selectedDesignImgIdx, setSelectedDesignImgIdx] = useState(0);
   const [inquiries, setInquiries] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [feedbacks, setFeedbacks] = useState([]);
@@ -288,9 +290,10 @@ export default function ClientDashboard() {
           getDownPayments({ clientId: currentClient.id }),
           getPaymentSummary(currentClient.id),
           getProjectRequests(currentClient.id),
+          getContracts(currentClient.id),
         ]);
 
-        const [inqRes, docRes, notifRes, fbRes, dpRes, summaryRes, reqRes] = results;
+        const [inqRes, docRes, notifRes, fbRes, dpRes, summaryRes, reqRes, contractRes] = results;
         setInquiries(inqRes.status === 'fulfilled' ? inqRes.value || [] : []);
         setDocuments(docRes.status === 'fulfilled' ? docRes.value || [] : []);
         setNotifications(notifRes.status === 'fulfilled' ? notifRes.value || [] : []);
@@ -298,6 +301,7 @@ export default function ClientDashboard() {
         setDownPayments(dpRes.status === 'fulfilled' ? dpRes.value || [] : []);
         setPaymentSummary(summaryRes.status === 'fulfilled' ? summaryRes.value : null);
         setProjectRequests(reqRes.status === 'fulfilled' ? reqRes.value || [] : []);
+        setContracts(contractRes.status === 'fulfilled' ? contractRes.value || [] : []);
       }
       setError('');
     } catch (err) {
@@ -1888,15 +1892,15 @@ export default function ClientDashboard() {
             <div className="light-panel-card">
               <div className="panel-card-head">
                 <div>
-                  <span className="brand-green-subtitle">PROJECT SUPPORT</span>
-                  <h3 className="panel-title">Send Inquiry to Project Team</h3>
+                  <span className="brand-green-subtitle">DIRECT PROJECT MANAGER COMMUNICATION</span>
+                  <h3 className="panel-title">Send Inquiry Directly to Project Manager</h3>
                 </div>
               </div>
 
               <form onSubmit={handleSendInquiry}>
                 <div className="form-grid-2">
                   <div className="form-input-box">
-                    <label>Related Construction Project (Added by Project Manager)</label>
+                    <label>Related Construction Project (Optional)</label>
                     <select
                       value={inquiryProjectId}
                       onChange={(e) => setInquiryProjectId(e.target.value)}
@@ -1924,7 +1928,7 @@ export default function ClientDashboard() {
                   <label>Message *</label>
                   <textarea
                     rows={4}
-                    placeholder="Describe your inquiry..."
+                    placeholder="Describe your questions or requirements directly to your Project Manager..."
                     value={inquiryMessage}
                     onChange={(e) => setInquiryMessage(e.target.value)}
                     required
@@ -1943,7 +1947,7 @@ export default function ClientDashboard() {
                   style={{ marginTop: '1.25rem' }}
                   disabled={sendingInquiry}
                 >
-                  {sendingInquiry ? 'Sending...' : 'Submit Inquiry'}
+                  {sendingInquiry ? 'Sending to Project Manager...' : 'Submit Inquiry to Project Manager'}
                 </button>
               </form>
             </div>
@@ -1952,8 +1956,8 @@ export default function ClientDashboard() {
             <div className="light-panel-card">
               <div className="panel-card-head">
                 <div>
-                  <span className="brand-green-subtitle">ARCHIVE</span>
-                  <h3 className="panel-title">Inquiry History &amp; Official Responses</h3>
+                  <span className="brand-green-subtitle">CONVERSATION ARCHIVE</span>
+                  <h3 className="panel-title">Project Manager Inquiries &amp; Official Responses</h3>
                 </div>
               </div>
 
@@ -1961,7 +1965,7 @@ export default function ClientDashboard() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                   {inquiries.map((inq) => {
                     const isReplying = clientReplyingId === inq.id;
-                    const isManagerInitiated = inq.initiatedBy === 'CLIENT_MANAGER';
+                    const isManagerInitiated = inq.initiatedBy === 'PROJECT_MANAGER' || inq.initiatedBy === 'CLIENT_MANAGER';
                     return (
                     <div
                       key={inq.id}
@@ -1978,7 +1982,7 @@ export default function ClientDashboard() {
                           <strong style={{ fontSize: '1.1rem', color: '#0f172a' }}>{inq.subject}</strong>
                           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.25rem', fontSize: '0.85rem' }}>
                             <small style={{ color: 'var(--text-muted)' }}>
-                              Started {formatDate(inq.createdAt)} {isManagerInitiated ? 'by Client Manager' : 'by You'}
+                              Started {formatDate(inq.createdAt)} {isManagerInitiated ? 'by Project Manager' : 'by You'}
                             </small>
                             {(inq.design || inq.project) && (
                               <small style={{ color: '#0369a1', fontWeight: 600 }}>
@@ -1995,12 +1999,98 @@ export default function ClientDashboard() {
                           border: `1px solid ${inq.status === 'ANSWERED' ? '#bbf7d0' : '#fde68a'}`,
                           padding: '0.25rem 0.65rem',
                         }}>
-                          {inq.status === 'ANSWERED' ? 'New Reply from Manager' : 'Awaiting Manager'}
+                          {inq.status === 'ANSWERED' ? 'New Reply from Project Manager' : 'Awaiting Project Manager'}
                         </span>
                       </div>
 
                       {/* Threaded Conversation History */}
                       <InquiryThread inquiry={inq} viewerRole="CLIENT" />
+
+                      {/* Project Manager Feasibility Decision Display */}
+                      {inq.pmDecision === 'APPROVED' ? (
+                        <div style={{
+                          margin: '0.85rem 0',
+                          padding: '0.9rem 1.1rem',
+                          background: '#ecfdf5',
+                          border: '1.5px solid #10b981',
+                          borderRadius: '8px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ background: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
+                                ✓ PROJECT MANAGER FEASIBILITY APPROVED
+                              </span>
+                              <span style={{ fontSize: '0.82rem', color: '#065f46', fontWeight: 600 }}>
+                                Evaluated on {inq.pmDecisionDate ? formatDate(inq.pmDecisionDate) : 'Recently'}
+                              </span>
+                            </div>
+                            {inq.contractGenerated && (
+                              <button
+                                type="button"
+                                className="btn-solid-green"
+                                style={{ fontSize: '0.78rem', padding: '0.3rem 0.85rem' }}
+                                onClick={() => setActiveTab('documents')}
+                              >
+                                View Contract Agreement →
+                              </button>
+                            )}
+                          </div>
+
+                          <div style={{ marginTop: '0.5rem', fontSize: '0.88rem', color: '#064e3b', display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                            {inq.pmEstimatedBudget > 0 && <span><strong>Estimated Construction Cost:</strong> {formatMoney(inq.pmEstimatedBudget)}</span>}
+                            {inq.pmEstimatedDuration && <span><strong>Estimated Timeline:</strong> {inq.pmEstimatedDuration}</span>}
+                          </div>
+
+                          {inq.pmDecisionRemarks && (
+                            <p style={{ margin: '0.4rem 0 0', fontSize: '0.84rem', color: '#047857' }}>
+                              <strong>Project Manager Remarks:</strong> {inq.pmDecisionRemarks}
+                            </p>
+                          )}
+
+                          <div style={{ marginTop: '0.55rem', fontSize: '0.82rem', color: '#047857', background: 'rgba(16, 185, 129, 0.1)', padding: '6px 10px', borderRadius: '6px' }}>
+                            {inq.contractGenerated
+                              ? '🎉 Official Contract Agreement has been prepared and linked by Client Management. You can review the contract terms under your Documents & Contracts section.'
+                              : '📋 Project Manager has confirmed technical feasibility. Client Management will generate and sign your official contract agreement shortly.'}
+                          </div>
+                        </div>
+                      ) : inq.pmDecision === 'REJECTED' ? (
+                        <div style={{
+                          margin: '0.85rem 0',
+                          padding: '0.85rem 1rem',
+                          background: '#fef2f2',
+                          border: '1.5px solid #ef4444',
+                          borderRadius: '8px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ background: '#dc2626', color: '#fff', fontSize: '0.75rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
+                              ✕ PROJECT MANAGER FEASIBILITY: NOT FEASIBLE
+                            </span>
+                            <span style={{ fontSize: '0.82rem', color: '#991b1b', fontWeight: 600 }}>
+                              Decided on {inq.pmDecisionDate ? formatDate(inq.pmDecisionDate) : 'Recently'}
+                            </span>
+                          </div>
+                          {inq.pmDecisionRemarks && (
+                            <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem', color: '#b91c1c' }}>
+                              <strong>PM Technical Remarks:</strong> {inq.pmDecisionRemarks}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{
+                          margin: '0.65rem 0',
+                          padding: '0.5rem 0.85rem',
+                          background: '#f8fafc',
+                          border: '1px dashed #cbd5e1',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontSize: '0.82rem',
+                          color: '#475569'
+                        }}>
+                          <span>⏳ <strong>Project Manager Assessment:</strong> Direct engineering review and costing in progress with the Project Manager.</span>
+                        </div>
+                      )}
 
                       {inq.attachmentData && (
                         <div style={{ margin: '0.5rem 0' }}>
@@ -2020,11 +2110,11 @@ export default function ClientDashboard() {
                           borderRadius: 8,
                         }}>
                           <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', color: '#0f172a', marginBottom: '0.35rem' }}>
-                            Your Reply to Client Manager:
+                            Your Reply to Project Manager:
                           </label>
                           <textarea
                             rows={3}
-                            placeholder="Type your reply or question here..."
+                            placeholder="Type your reply or question directly to your Project Manager..."
                             value={clientReplyText}
                             onChange={(e) => setClientReplyText(e.target.value)}
                             style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.9rem', boxSizing: 'border-box' }}
@@ -2081,6 +2171,91 @@ export default function ClientDashboard() {
         {/* TAB 6: DOCUMENTS */}
         {activeTab === 'documents' && (
           <div>
+            {/* Active Signed Client Contracts */}
+            <div className="light-panel-card" style={{ marginBottom: '1.5rem' }}>
+              <div className="panel-card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div>
+                  <span className="brand-green-subtitle">LEGAL AGREEMENTS</span>
+                  <h3 className="panel-title">Your Construction Contracts &amp; Signed Agreements</h3>
+                  <p className="panel-meta">Legally binding construction and turnkey development agreements signed with Odiliya Homes.</p>
+                </div>
+                {contracts.length > 0 && (
+                  <span className="pill-badge active" style={{ fontSize: '0.8rem', padding: '0.35rem 0.85rem' }}>
+                    {contracts.length} {contracts.length === 1 ? 'Active Contract' : 'Active Contracts'}
+                  </span>
+                )}
+              </div>
+
+              {contracts.length > 0 ? (
+                <div className="table-responsive-box" style={{ marginTop: '1rem' }}>
+                  <table className="light-table">
+                    <thead>
+                      <tr>
+                        <th>Contract No.</th>
+                        <th>Title / Project Scope</th>
+                        <th>Agreed Amount</th>
+                        <th>Signed Date</th>
+                        <th>Validity / End Date</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: 'center' }}>Agreement Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contracts.map((c) => (
+                        <tr key={c.id}>
+                          <td><strong>{c.contractNumber}</strong></td>
+                          <td>
+                            <strong>{c.title}</strong>
+                            {c.terms && (
+                              <p style={{ margin: '0.25rem 0 0', fontSize: '0.76rem', color: '#64748b', maxWidth: '280px', whiteSpace: 'pre-line' }}>
+                                {c.terms}
+                              </p>
+                            )}
+                          </td>
+                          <td><strong style={{ color: '#047857' }}>{formatMoney(c.amount)}</strong></td>
+                          <td>{formatDate(c.signedDate)}</td>
+                          <td>{c.endDate ? formatDate(c.endDate) : 'Standard Duration'}</td>
+                          <td>
+                            <span className={`pill-badge ${c.status?.toLowerCase() || 'active'}`} style={{
+                              background: c.status === 'ACTIVE' ? '#dcfce7' : '#fef3c7',
+                              color: c.status === 'ACTIVE' ? '#15803d' : '#b45309',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              border: `1px solid ${c.status === 'ACTIVE' ? '#bbf7d0' : '#fde68a'}`,
+                              padding: '0.25rem 0.6rem'
+                            }}>
+                              {c.status}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => downloadFile(null, `Odiliya_Contract_${c.contractNumber}.pdf`, `Odiliya Contract Agreement - ${c.title}`, {
+                                contractNumber: c.contractNumber,
+                                title: c.title,
+                                amount: formatMoney(c.amount),
+                                client: clientProfile?.name || 'Valued Client',
+                                signedDate: formatDate(c.signedDate),
+                                validity: c.endDate ? formatDate(c.endDate) : 'Standard Contract Duration',
+                                status: c.status,
+                                terms: c.terms || 'Standard construction agreement executed with Odiliya Homes & Luxury Properties.'
+                              })}
+                              className="btn-solid-green"
+                              style={{ padding: '0.35rem 0.8rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              📄 Download Agreement (PDF)
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-muted" style={{ margin: '1rem 0 0' }}>No signed contracts recorded yet.</p>
+              )}
+            </div>
+
             <div className="light-panel-card">
               <div className="panel-card-head">
                 <div>
@@ -2187,33 +2362,177 @@ export default function ClientDashboard() {
 
             {/* Standard Client Legal & Warranty Downloads */}
             <div className="light-panel-card" style={{ marginTop: '1.5rem' }}>
-              <div className="panel-card-head">
+              <div className="panel-card-head" style={{ marginBottom: '1.25rem' }}>
                 <div>
                   <span className="brand-green-subtitle">OFFICIAL TEMPLATES &amp; POLICIES</span>
-                  <h3 className="panel-title">Standard Client Contracts &amp; Warranty Guides</h3>
-                  <p className="panel-meta">Download standard construction contracts, warranty guarantees, and milestone payment schedules.</p>
+                  <h3 className="panel-title" style={{ margin: '0.2rem 0' }}>Standard Client Contracts &amp; Warranty Guides</h3>
+                  <p className="panel-meta" style={{ margin: 0 }}>
+                    Download certified construction contracts, structural warranty policies, and milestone payment schedules.
+                  </p>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gap: '1.25rem',
+              }}>
                 {[
-                  { name: 'Odiliya_Standard_Client_Construction_Agreement.pdf', size: '480 KB', desc: 'Official master client-builder construction agreement' },
-                  { name: 'Odiliya_Structural_and_Waterproofing_Warranty.pdf', size: '320 KB', desc: '10-Year structural guarantee & 5-year waterproofing policy' },
-                  { name: 'Odiliya_Milestone_Payment_Schedule_Policy.pdf', size: '240 KB', desc: 'Standard stage payment terms and certification steps' },
-                  { name: 'Odiliya_Custom_Home_Finishing_Specifications.pdf', size: '1.2 MB', desc: 'Material grade, fixtures, fittings and brand standards' },
+                  {
+                    title: 'Standard Client Construction Agreement',
+                    name: 'Odiliya_Standard_Client_Construction_Agreement.pdf',
+                    size: '480 KB',
+                    category: 'Master Contract',
+                    desc: 'Official master client-builder construction agreement with standard terms, warranty covenants, and arbitration clauses.',
+                    details: {
+                      'Document Type': 'Master Client-Builder Construction Agreement',
+                      'Issuing Entity': 'Odiliya Homes & Real Estate (Pvt) Ltd',
+                      'Scope': 'Turnkey residential & commercial building specifications, milestone schedules, and legal provisions.',
+                      'Compliance': 'Standard Building Code & Sri Lanka ICTAD/CIDA Guidelines',
+                      'Validity': 'Execution to Final Handover & Defect Liability Clearance',
+                    }
+                  },
+                  {
+                    title: 'Structural & Waterproofing Warranty Guarantee',
+                    name: 'Odiliya_Structural_and_Waterproofing_Warranty.pdf',
+                    size: '320 KB',
+                    category: 'Warranty Policy',
+                    desc: '10-Year structural superstructure guarantee and 5-year specialized waterproofing coverage certificate.',
+                    details: {
+                      'Document Type': 'Engineering Quality & Warranty Policy',
+                      'Structural Guarantee': '10 Years (Reinforced Concrete Superstructure & Foundations)',
+                      'Waterproofing Guarantee': '5 Years (Roof Slabs, Balconies & Wet Areas)',
+                      'Issuing Division': 'Odiliya Civil Engineering Standards Board',
+                      'Claim Processing': 'Direct Site Inspection within 48 Hours',
+                    }
+                  },
+                  {
+                    title: 'Milestone Payment Schedule & Stage Policy',
+                    name: 'Odiliya_Milestone_Payment_Schedule_Policy.pdf',
+                    size: '240 KB',
+                    category: 'Financial Policy',
+                    desc: 'Transparent stage-by-stage construction payment milestones, site engineer verification, and certification steps.',
+                    details: {
+                      'Document Type': 'Payment & Milestone Schedule Policy',
+                      'Stage 1 (Foundation)': '20% upon site mobilization and foundation slab casting',
+                      'Stage 2 (Superstructure)': '30% on completion of columns, beams & roof slab',
+                      'Stage 3 (Finishing & MEP)': '35% upon masonry, plastering, plumbing & wiring',
+                      'Stage 4 (Handover)': '15% upon final inspection, key delivery & completion certificate',
+                    }
+                  },
+                  {
+                    title: 'Custom Home Finishing & Material Standards',
+                    name: 'Odiliya_Custom_Home_Finishing_Specifications.pdf',
+                    size: '1.2 MB',
+                    category: 'Material Guide',
+                    desc: 'Detailed specifications for Grade-A floor tiles, premium timber doors, branded sanitary ware, and modular electricals.',
+                    details: {
+                      'Document Type': 'Architectural Finishing & Material Standards',
+                      'Flooring & Tiling': 'Imported Grade-A Porcelain & Glazed Ceramic Tiles',
+                      'Timber & Joinery': 'Treated Teak / Mahogany Doors & Solid Brass Fittings',
+                      'Sanitary Ware': 'Rocell / American Standard Luxury Bathroom Fittings',
+                      'Electrical': 'Concealed Fire-Retardant Wiring & Modular Switchgear (Orange / Clipsal)',
+                    }
+                  },
                 ].map((doc) => (
-                  <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                    <div style={{ flex: 1, marginRight: '0.5rem' }}>
-                      <strong style={{ fontSize: '0.85rem', color: '#0f172a', display: 'block' }}>{doc.name}</strong>
-                      <small style={{ color: '#64748b', fontSize: '0.75rem' }}>{doc.desc} • {doc.size}</small>
+                  <div
+                    key={doc.name}
+                    style={{
+                      background: '#ffffff',
+                      borderRadius: '10px',
+                      border: '1px solid #e2e8f0',
+                      padding: '1.25rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                      transition: 'all 0.2s ease',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div>
+                      {/* Top Badges & Icon */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                        }}>
+                          📄 {doc.category}
+                        </span>
+                        <span style={{
+                          background: '#f1f5f9',
+                          color: '#475569',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '0.72rem',
+                          fontWeight: 600,
+                        }}>
+                          PDF • {doc.size}
+                        </span>
+                      </div>
+
+                      {/* Title */}
+                      <h4 style={{ margin: '0 0 0.4rem 0', color: '#0f172a', fontSize: '1rem', fontWeight: 700, lineHeight: 1.35 }}>
+                        {doc.title}
+                      </h4>
+
+                      {/* Description */}
+                      <p style={{ margin: '0 0 0.85rem 0', color: '#64748b', fontSize: '0.84rem', lineHeight: 1.45 }}>
+                        {doc.desc}
+                      </p>
+
+                      {/* Filename Pill */}
+                      <div style={{
+                        background: '#f8fafc',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #e2e8f0',
+                        fontSize: '0.75rem',
+                        color: '#334155',
+                        fontFamily: 'monospace',
+                        wordBreak: 'break-all',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}>
+                        <span style={{ color: '#ef4444', fontWeight: 700 }}>PDF</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.name}</span>
+                      </div>
                     </div>
+
+                    {/* Download Action Button */}
                     <button
                       type="button"
-                      onClick={() => downloadFile(null, doc.name)}
-                      className="btn-outline-green"
-                      style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      onClick={() => downloadFile(null, doc.name, doc.title, doc.details)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 14px',
+                        background: '#047857',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontWeight: 700,
+                        fontSize: '0.84rem',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        transition: 'background 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = '#065f46')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = '#047857')}
                     >
-                      Download
+                      <span>📥</span> Download PDF Document
                     </button>
                   </div>
                 ))}
@@ -3428,13 +3747,13 @@ export default function ClientDashboard() {
           </div>
         )}
 
-        {/* ===== COMPANY DESIGN INQUIRY MODAL (DIRECT TO CLIENT MANAGER) ===== */}
+        {/* ===== COMPANY DESIGN INQUIRY MODAL (DIRECT TO PROJECT MANAGER) ===== */}
         {designInquiryModalOpen && designInquiryTarget && (
           <div className="light-modal-overlay" style={{ zIndex: 10000, padding: '1rem' }}>
             <div className="light-modal-box" style={{ maxWidth: '620px', width: '95%', padding: '1.75rem', borderRadius: '14px' }}>
               <div className="modal-head-row">
                 <div>
-                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>OFFICIAL INQUIRY TO CLIENT MANAGER</span>
+                  <span className="brand-green-subtitle" style={{ fontSize: '0.8rem' }}>DIRECT INQUIRY TO PROJECT MANAGER</span>
                   <h3 style={{ margin: '0.2rem 0 0', color: '#0f172a' }}>Inquire: {designInquiryTarget.name}</h3>
                 </div>
                 <button type="button" onClick={() => { setDesignInquiryModalOpen(false); setDesignInquiryTarget(null); }}>×</button>
@@ -3457,13 +3776,13 @@ export default function ClientDashboard() {
                     rows={4}
                     value={designInquiryMessage}
                     onChange={(e) => setDesignInquiryMessage(e.target.value)}
-                    placeholder="Describe your questions or requirements regarding this design..."
+                    placeholder="Describe your questions or requirements directly to the Project Manager..."
                     required
                   />
                 </div>
 
                 <small style={{ display: 'block', color: 'var(--text-muted)', marginTop: '0.6rem', fontSize: '0.8rem' }}>
-                  Your inquiry will be sent directly to the Client Manager and logged into your inquiry history with today's date.
+                  Your inquiry will be sent directly to the Project Manager and logged into your inquiry conversation history with today's date.
                 </small>
 
                 <div className="modal-actions-row" style={{ marginTop: '1.5rem' }}>
@@ -3480,7 +3799,7 @@ export default function ClientDashboard() {
                     className="btn-solid-green"
                     disabled={sendingDesignInquiry}
                   >
-                    {sendingDesignInquiry ? 'Sending to Client Manager...' : 'Submit Inquiry to Client Manager'}
+                    {sendingDesignInquiry ? 'Sending to Project Manager...' : 'Submit Inquiry to Project Manager'}
                   </button>
                 </div>
               </form>

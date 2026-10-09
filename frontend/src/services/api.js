@@ -162,14 +162,22 @@ export const createDesign = (design) => request('/api/designs', { method: 'POST'
 export const updateDesign = (id, design) => request(`/api/designs/${id}`, { method: 'PUT', body: design });
 export const deleteDesign = (id) => request(`/api/designs/${id}`, { method: 'DELETE' });
 
-// Inquiries & Communication History (US-CM-14, 15, 16)
+// Inquiries & Direct Client-Project Manager Communication (Direct PM-Client Flow)
 export const getInquiries = (clientId) => request(`/api/inquiries${clientId ? `?clientId=${clientId}` : ''}`);
 export const createInquiry = (inquiry) => request('/api/inquiries', { method: 'POST', body: inquiry });
-export const respondToInquiry = (id, response, respondedBy = 'Client Manager') => request(`/api/inquiries/${id}/respond`, {
+export const respondToInquiry = (id, response, respondedBy = 'Project Manager') => request(`/api/inquiries/${id}/respond`, {
   method: 'PUT',
   body: { response, respondedBy },
 });
-// Threaded conversation: senderRole is 'CLIENT' or 'CLIENT_MANAGER'
+export const submitInquiryDecision = (id, payload) => request(`/api/inquiries/${id}/decision`, {
+  method: 'PUT',
+  body: payload,
+});
+export const linkInquiryContract = (id, contractId) => request(`/api/inquiries/${id}/contract-linked`, {
+  method: 'PUT',
+  body: { contractId },
+});
+// Threaded conversation: senderRole is 'CLIENT' or 'PROJECT_MANAGER'
 export const sendInquiryMessage = (id, { senderRole, senderName, message }) => request(`/api/inquiries/${id}/messages`, {
   method: 'POST',
   body: { senderRole, senderName, message },

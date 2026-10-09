@@ -16,7 +16,7 @@ import {
   createMaterialRequest,
   getProjects,
 } from '../services/api';
-import { downloadFile, exportCsv } from '../utils/documentDownload';
+import { downloadFile, exportCsv, exportExcel } from '../utils/documentDownload';
 
 // Roles list for profile editing
 const ROLES_LIST = [
@@ -1519,7 +1519,8 @@ export default function EmployeeDashboard() {
                   <button
                     type="button"
                     onClick={() => {
-                      exportCsv(
+                      exportExcel(
+                        `Odiliya_My_Attendance_Records_${user?.username || 'Staff'}`,
                         attendance.map((a) => ({
                           'Date': a.date,
                           'Status': a.status,
@@ -1528,7 +1529,8 @@ export default function EmployeeDashboard() {
                           'Remarks': a.remarks || '—',
                           'Recorded By': a.recordedBy || 'Manager',
                         })),
-                        `Odiliya_My_Attendance_Records_${user?.username || 'Staff'}`
+                        null,
+                        'My Attendance'
                       );
                     }}
                     style={{
@@ -1545,7 +1547,7 @@ export default function EmployeeDashboard() {
                       gap: '6px',
                     }}
                   >
-                    Export My Attendance (CSV)
+                    Export My Attendance (Excel)
                   </button>
 
                   <button

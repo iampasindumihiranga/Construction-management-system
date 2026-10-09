@@ -18,7 +18,7 @@ import {
   registerEmployee,
   updateEmployeeProfile,
 } from '../services/api';
-import { downloadFile, exportCsv } from '../utils/documentDownload';
+import { downloadFile, exportCsv, exportExcel } from '../utils/documentDownload';
 
 const ROLES_LIST = [
   'Site Engineer',
@@ -448,8 +448,8 @@ export default function EmployeeManagerDashboard() {
     }));
 
     const cleanEmpName = emp.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    exportCsv(rows, `Attendance_${cleanEmpName}_${today}`);
-    report(`Attendance Excel sheet exported for ${emp.name}.`);
+    exportExcel(`Odiliya_Attendance_${cleanEmpName}_${today}`, rows, null, `Attendance - ${emp.name}`);
+    report(`Attendance Excel sheet (.xlsx) exported successfully for ${emp.name}.`);
   };
 
 
@@ -1115,9 +1115,9 @@ export default function EmployeeManagerDashboard() {
                             <button
                               onClick={() => downloadEmployeeAttendance(emp)}
                               style={{ padding: '4px 9px', background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#047857', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer', fontWeight: 600 }}
-                              title={`Download Attendance Sheet for ${emp.name} (CSV/Excel)`}
+                              title={`Download Attendance Excel Sheet for ${emp.name} (.xlsx)`}
                             >
-                              Download Attendance
+                              Download Attendance (Excel)
                             </button>
                             <button
                               onClick={() => editProfile(emp)}
@@ -1645,24 +1645,65 @@ export default function EmployeeManagerDashboard() {
               {/* Date Information Bar */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', paddingTop: '16px', borderTop: '1px solid #f3f4f6' }}>
                 {attSubTab === 'markTable' ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', width: '100%' }}>
-                    <span style={{
-                      padding: '6px 14px',
-                      borderRadius: '8px',
-                      fontSize: '0.88rem',
-                      fontWeight: 700,
-                      background: '#ecfdf5',
-                      color: '#047857',
-                      border: '1px solid #a7f3d0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}>
-                      Today's Marking Register: <b>{formatDate(today)}</b> | Live Time: <b>{currentTimeDisplay}</b>
-                    </span>
-                    <span style={{ fontSize: '0.82rem', color: '#047857', background: '#f0fdf4', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bbf7d0', fontWeight: 600 }}>
-                      Marking is active for Today only. Historical and upcoming dates cannot be marked.
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        fontSize: '0.88rem',
+                        fontWeight: 700,
+                        background: '#ecfdf5',
+                        color: '#047857',
+                        border: '1px solid #a7f3d0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}>
+                        Today's Marking Register: <b>{formatDate(today)}</b> | Live Time: <b>{currentTimeDisplay}</b>
+                      </span>
+                      <span style={{ fontSize: '0.82rem', color: '#047857', background: '#f0fdf4', padding: '6px 12px', borderRadius: '6px', border: '1px solid #bbf7d0', fontWeight: 600 }}>
+                        Marking is active for Today only. Historical and upcoming dates cannot be marked.
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        exportExcel(
+                          `Odiliya_Daily_Attendance_${today}`,
+                          attendanceList.map((a) => ({
+                            'Date': a.date,
+                            'Employee ID': a.employee?.employeeId || `EMP-${a.employee?.id}`,
+                            'Full Name': a.employee?.name || 'Staff',
+                            'Role': a.employee?.role || a.employee?.position || 'General',
+                            'Department': a.employee?.department || 'General',
+                            'Status': a.status,
+                            'Time In': a.checkInTime || '—',
+                            'Time Out': a.checkOutTime || '—',
+                            'Remarks': a.remarks || '—',
+                            'Recorded By': a.recordedBy || 'Manager',
+                          })),
+                          null,
+                          `Attendance ${today}`
+                        );
+                        report(`Today's Attendance exported as Excel sheet (.xlsx).`);
+                      }}
+                      style={{
+                        padding: '7px 14px',
+                        background: '#047857',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '7px',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      Export Today's Attendance (Excel)
+                    </button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -1902,7 +1943,7 @@ export default function EmployeeManagerDashboard() {
                               <td style={{ padding: '12px 16px', fontSize: '0.82rem', color: '#4b5563' }}>
                                 {isInShift ? (
                                   <div>
-                                    <div><b>In:</b> <span style={{ color: '#047857', fontWeight: 800 }}>{record?.checkInTime}</span> <span style={{ fontSize: '0.72rem', color: '#047857' }}>(Arrival Frozen)</span></div>
+                                    <div><b>In:</b> <span style={{ color: '#047857', fontWeight: 800 }}>{record?.checkInTime}</span> <span style={{ fontSize: '0.72rem', color: '#047857' }}>(Arrival)</span></div>
                                     <div style={{ marginTop: '2px' }}>
                                       <b>Out:</b> <span style={{ color: '#d97706', fontWeight: 700, background: '#fef3c7', padding: '1px 6px', borderRadius: '4px', fontSize: '0.74rem' }}>
                                         Pending (Mark when leaving)
@@ -1912,7 +1953,7 @@ export default function EmployeeManagerDashboard() {
                                 ) : isFinalized && record?.checkInTime && record?.checkOutTime ? (
                                   <div>
                                     <div><b>In:</b> <span style={{ color: '#047857', fontWeight: 700 }}>{record.checkInTime}</span> <span style={{ fontSize: '0.72rem', color: '#047857' }}>(Arrival)</span></div>
-                                    <div><b>Out:</b> <span style={{ color: '#111827', fontWeight: 700 }}>{record.checkOutTime}</span> <span style={{ fontSize: '0.72rem', color: '#4b5563' }}>(Leaving Frozen)</span></div>
+                                    <div><b>Out:</b> <span style={{ color: '#111827', fontWeight: 700 }}>{record.checkOutTime}</span> <span style={{ fontSize: '0.72rem', color: '#4b5563' }}>(Leaving)</span></div>
                                   </div>
                                 ) : currentStatus === 'UNMARKED' ? (
                                   <div style={{ color: '#9ca3af', fontSize: '0.78rem' }}>
@@ -1972,9 +2013,9 @@ export default function EmployeeManagerDashboard() {
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                       }}
-                                      title={`Time In frozen to ${record.checkInTime}`}
+                                      title={`Time In ${record.checkInTime}`}
                                     >
-                                      In: {record.checkInTime} (Frozen)
+                                      In: {record.checkInTime}
                                     </span>
                                   ) : (
                                     <span
@@ -2027,9 +2068,9 @@ export default function EmployeeManagerDashboard() {
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                       }}
-                                      title={`Time Out frozen to ${record.checkOutTime}`}
+                                      title={`Time Out ${record.checkOutTime}`}
                                     >
-                                      Out: {record.checkOutTime} (Frozen)
+                                      Out: {record.checkOutTime}
                                     </span>
                                   ) : currentStatus === 'UNMARKED' ? (
                                     <button
@@ -2167,7 +2208,7 @@ export default function EmployeeManagerDashboard() {
                       </p>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <input
                         type="text"
                         placeholder="Search employee name, ID, notes..."
@@ -2187,6 +2228,45 @@ export default function EmployeeManagerDashboard() {
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          exportExcel(
+                            `Odiliya_Attendance_Master_Logs_${today}`,
+                            allAttendanceLogs.map((a) => ({
+                              'Date': a.date,
+                              'Employee ID': a.employee?.employeeId || `EMP-${a.employee?.id}`,
+                              'Full Name': a.employee?.name || 'Staff',
+                              'Role': a.employee?.role || a.employee?.position || 'General',
+                              'Department': a.employee?.department || 'General',
+                              'Status': a.status,
+                              'Time In': a.checkInTime || '—',
+                              'Time Out': a.checkOutTime || '—',
+                              'Remarks': a.remarks || '—',
+                              'Recorded By': a.recordedBy || 'Manager',
+                            })),
+                            null,
+                            'Attendance Logs'
+                          );
+                          report('Historical Attendance Logs exported as Excel sheet (.xlsx).');
+                        }}
+                        style={{
+                          padding: '8px 14px',
+                          background: '#047857',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Export Logs (Excel)
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2354,7 +2434,7 @@ export default function EmployeeManagerDashboard() {
                     Workforce Documents &amp; Attendance Exports
                   </h2>
                   <p style={{ margin: 0, color: '#6b7280', fontSize: '0.88rem' }}>
-                    Download separate attendance spreadsheets for each individual employee, master daily registers, and workforce roster sheets.
+                    Download separate attendance Excel spreadsheets (.xlsx) for each individual employee, master daily registers, and workforce roster sheets.
                   </p>
                 </div>
 
@@ -2362,7 +2442,8 @@ export default function EmployeeManagerDashboard() {
                   <button
                     type="button"
                     onClick={() => {
-                      exportCsv(
+                      exportExcel(
+                        `Odiliya_Workforce_Roster_${today}`,
                         employees.map((e) => ({
                           'Employee ID': e.employeeId || `EMP-${e.id}`,
                           'Full Name': e.name,
@@ -2374,8 +2455,10 @@ export default function EmployeeManagerDashboard() {
                           'Address': e.address || '—',
                           'Status': e.status,
                         })),
-                        `Odiliya_Workforce_Roster_${today}`
+                        null,
+                        'Workforce Roster'
                       );
+                      report('Workforce Roster Excel sheet exported successfully.');
                     }}
                     style={{
                       padding: '9px 16px',
@@ -2386,28 +2469,35 @@ export default function EmployeeManagerDashboard() {
                       fontWeight: 700,
                       fontSize: '0.85rem',
                       cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
                     }}
                   >
-                    Export Workforce Roster (CSV)
+                    Export Workforce Roster (Excel)
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
-                      exportCsv(
+                      exportExcel(
+                        `Odiliya_Daily_Attendance_${selectedDate}`,
                         attendanceList.map((a) => ({
                           'Date': a.date,
                           'Employee ID': a.employee?.employeeId || `EMP-${a.employee?.id}`,
                           'Full Name': a.employee?.name || 'Staff',
                           'Role': a.employee?.role || a.employee?.position || 'General',
+                          'Department': a.employee?.department || 'General',
                           'Status': a.status,
                           'Time In': a.checkInTime || '—',
                           'Time Out': a.checkOutTime || '—',
                           'Remarks': a.remarks || '—',
                           'Recorded By': a.recordedBy || 'Manager',
                         })),
-                        `Odiliya_Daily_Attendance_${selectedDate}`
+                        null,
+                        `Attendance ${selectedDate}`
                       );
+                      report(`Daily Attendance Excel sheet exported for ${selectedDate}.`);
                     }}
                     style={{
                       padding: '9px 16px',
@@ -2418,9 +2508,12 @@ export default function EmployeeManagerDashboard() {
                       fontWeight: 700,
                       fontSize: '0.85rem',
                       cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
                     }}
                   >
-                    Export Today's Attendance (CSV)
+                    Export Today's Attendance (Excel)
                   </button>
                 </div>
               </div>
@@ -2430,10 +2523,10 @@ export default function EmployeeManagerDashboard() {
             <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
               <div style={{ marginBottom: '16px', borderBottom: '1px solid #f3f4f6', paddingBottom: '12px' }}>
                 <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.2rem', fontWeight: 800 }}>
-                  Individual Employee Attendance Export (Excel / CSV)
+                  Individual Employee Attendance Export (Excel Sheet)
                 </h3>
                 <p style={{ margin: 0, color: '#6b7280', fontSize: '0.85rem' }}>
-                  Select any employee to immediately download their complete individual attendance log history as an Excel/CSV spreadsheet.
+                  Select any employee to immediately download their complete individual attendance log history as an Excel (.xlsx) spreadsheet.
                 </p>
               </div>
 
@@ -2477,7 +2570,7 @@ export default function EmployeeManagerDashboard() {
                     boxShadow: selectedExportEmpId ? '0 2px 4px rgba(4, 120, 87, 0.25)' : 'none',
                   }}
                 >
-                  Download Selected Attendance Sheet
+                  Download Selected Attendance (Excel)
                 </button>
               </div>
 
@@ -2529,7 +2622,7 @@ export default function EmployeeManagerDashboard() {
                                 cursor: 'pointer',
                               }}
                             >
-                              Download Attendance (CSV)
+                              Download Attendance (Excel)
                             </button>
                           </td>
                         </tr>
@@ -2540,116 +2633,81 @@ export default function EmployeeManagerDashboard() {
               </div>
             </div>
 
-            {/* Document Sections Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginBottom: '24px' }}>
-              {/* Card 1: Data Reports */}
-              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem' }}>
-                  Workforce Master Reports
+            {/* Workforce Master Reports Card */}
+            <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '24px' }}>
+              <div style={{ marginBottom: '16px', borderBottom: '1px solid #f3f4f6', paddingBottom: '12px' }}>
+                <h3 style={{ margin: '0 0 4px', color: '#111827', fontSize: '1.2rem', fontWeight: 800 }}>
+                  Workforce Master Reports (Excel Sheets)
                 </h3>
-                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
-                  Generate and download real-time CSV and spreadsheet records for audits and payroll calculations.
+                <p style={{ color: '#6b7280', fontSize: '0.85rem', margin: 0 }}>
+                  Generate and download real-time Excel spreadsheets (.xlsx) for workforce master registers, payroll calculations, and compliance audits.
                 </p>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.88rem' }}>Complete Workforce Register</div>
-                      <div style={{ color: '#6b7280', fontSize: '0.78rem' }}>{employees.length} Active &amp; Registered Personnel</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        exportCsv(
-                          employees.map((e) => ({
-                            'Employee ID': e.employeeId || `EMP-${e.id}`,
-                            'Full Name': e.name,
-                            'Email': e.email || '—',
-                            'Phone': e.phone || '—',
-                            'Role': e.role || e.position,
-                            'Department': e.department || 'General',
-                            'Status': e.status,
-                          })),
-                          'Odiliya_Workforce_Roster'
-                        );
-                      }}
-                      style={{ padding: '6px 12px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '6px', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}
-                    >
-                      Download CSV
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.88rem' }}>Full Historical Attendance Logs</div>
-                      <div style={{ color: '#6b7280', fontSize: '0.78rem' }}>{allAttendanceLogs.length} Total Shift Records</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        exportCsv(
-                          allAttendanceLogs.map((a) => ({
-                            'Date': a.date,
-                            'Employee ID': a.employee?.employeeId || `EMP-${a.employee?.id}`,
-                            'Staff Name': a.employee?.name || 'Staff',
-                            'Role': a.employee?.role || a.employee?.position || 'General',
-                            'Status': a.status,
-                            'Time In': a.checkInTime || '—',
-                            'Time Out': a.checkOutTime || '—',
-                            'Remarks': a.remarks || '—',
-                            'Recorded By': a.recordedBy || 'Manager',
-                          })),
-                          'Odiliya_Attendance_History_Full'
-                        );
-                      }}
-                      style={{ padding: '6px 12px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '6px', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer' }}
-                    >
-                      Download CSV
-                    </button>
-                  </div>
-                </div>
               </div>
 
-              {/* Card 2: Legal & HR Policy Documents */}
-              <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <h3 style={{ margin: '0 0 8px', color: '#111827', fontSize: '1.1rem' }}>
-                  HR Policies &amp; Employment Guidelines
-                </h3>
-                <p style={{ color: '#6b7280', fontSize: '0.83rem', margin: '0 0 16px' }}>
-                  Official Odiliya Construction HR documents, job contracts, and workplace safety compliance guidelines.
-                </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '10px', border: '1px solid #f3f4f6' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.95rem' }}>Complete Workforce Register</div>
+                    <div style={{ color: '#6b7280', fontSize: '0.8rem', marginTop: '2px' }}>{employees.length} Active &amp; Registered Personnel</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportExcel(
+                        'Odiliya_Complete_Workforce_Register',
+                        employees.map((e) => ({
+                          'Employee ID': e.employeeId || `EMP-${e.id}`,
+                          'Full Name': e.name,
+                          'Email': e.email || '—',
+                          'Phone': e.phone || '—',
+                          'Role / Trade': e.role || e.position,
+                          'Department': e.department || 'General',
+                          'Qualifications': e.qualifications || '—',
+                          'Address': e.address || '—',
+                          'Status': e.status,
+                        })),
+                        null,
+                        'Workforce Register'
+                      );
+                      report('Workforce Master Register exported as Excel sheet.');
+                    }}
+                    style={{ padding: '8px 16px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '7px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
+                  >
+                    Download Excel
+                  </button>
+                </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {[
-                    { name: 'Standard Construction Employment Agreement.pdf', size: '240 KB', desc: 'Official permanent & site contractor contract template' },
-                    { name: 'Workforce Safety, Health & PPE Policy Manual.pdf', size: '1.4 MB', desc: 'Mandatory construction site safety and hazard guidelines' },
-                    { name: 'Shift Attendance & Overtime Regulations.pdf', size: '180 KB', desc: 'Rules for Time In/Out marking, late arrival, and half days' },
-                    { name: 'Trade Licensing & NVQ Qualification Guide.pdf', size: '320 KB', desc: 'Certification requirements for site engineering staff' },
-                  ].map((doc) => (
-                    <div key={doc.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', border: '1px solid #f3f4f6' }}>
-                      <div style={{ flex: 1, marginRight: '10px' }}>
-                        <div style={{ fontWeight: 600, color: '#111827', fontSize: '0.84rem' }}>{doc.name}</div>
-                        <div style={{ color: '#6b7280', fontSize: '0.74rem' }}>{doc.desc} • {doc.size}</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => downloadFile(null, doc.name)}
-                        style={{
-                          padding: '6px 12px',
-                          background: '#ecfdf5',
-                          color: '#047857',
-                          border: '1px solid #a7f3d0',
-                          borderRadius: '6px',
-                          fontWeight: 700,
-                          fontSize: '0.78rem',
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        Download
-                      </button>
-                    </div>
-                  ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '10px', border: '1px solid #f3f4f6' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#111827', fontSize: '0.95rem' }}>Full Historical Attendance Logs</div>
+                    <div style={{ color: '#6b7280', fontSize: '0.8rem', marginTop: '2px' }}>{allAttendanceLogs.length} Total Shift Records Across All Employees</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportExcel(
+                        'Odiliya_Attendance_History_Full_Master',
+                        allAttendanceLogs.map((a) => ({
+                          'Date': a.date,
+                          'Employee ID': a.employee?.employeeId || `EMP-${a.employee?.id}`,
+                          'Staff Name': a.employee?.name || 'Staff',
+                          'Role': a.employee?.role || a.employee?.position || 'General',
+                          'Department': a.employee?.department || 'General',
+                          'Status': a.status,
+                          'Time In': a.checkInTime || '—',
+                          'Time Out': a.checkOutTime || '—',
+                          'Remarks': a.remarks || '—',
+                          'Recorded By': a.recordedBy || 'Manager',
+                        })),
+                        null,
+                        'Historical Attendance'
+                      );
+                      report('Complete historical attendance logs exported as Excel sheet.');
+                    }}
+                    style={{ padding: '8px 16px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '7px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
+                  >
+                    Download Excel
+                  </button>
                 </div>
               </div>
             </div>

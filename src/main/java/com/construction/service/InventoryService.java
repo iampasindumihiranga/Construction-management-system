@@ -110,17 +110,11 @@ public class InventoryService {
             // legacy request-table columns from earlier database versions.
         }
 
-        if (supplierRepository.count() == 0) {
-            Supplier tokyo = new Supplier("SUP001", "Tokyo Cement Lanka", "Kamal Perera", "+94 11 258 9631", "sales@tokyocement.lk", "Negombo Road, Peliyagoda", "Building Materials", "Portland General Cement, Blended Hydraulic Cement, Ready-mix Mortar", "Net 30 Days");
-            Supplier kelaniBricks = new Supplier("SUP002", "Kelani Brick Works", "Sunil Silva", "+94 11 291 4455", "info@kelanibricks.lk", "Biyagama Road, Kelaniya", "Building Materials", "Wire-Cut Red Bricks, Clay Engineering Bricks, Solid Blocks", "Cash on Delivery");
-            Supplier mahaweliSand = new Supplier("SUP003", "Mahaweli Sand Suppliers", "Anura Bandara", "+94 81 223 8899", "orders@mahawelisand.lk", "Katugastota, Kandy", "Building Materials", "Fine River Sand, Plastering Sand, Concrete Aggregate Sand", "Net 15 Days");
-            Supplier lanwaSteel = new Supplier("SUP004", "Lanwa Sanstha Steel", "Nimal Fernando", "+94 11 245 7788", "contracts@lanwasteel.com", "Ceylon Steel Complex, Oruwala, Athurugiriya", "Structural Steel", "12mm Deformed High-Yield Rebars, 16mm Tor Steel, BRC Wire Mesh", "Net 30 Days");
-            Supplier kelaniCables = new Supplier("SUP005", "Kelani Cables PLC", "Ravi Jayawardena", "+94 11 252 5701", "marketing@kelanicables.com", "P.O. Box 14, Wewelduwa, Kelaniya", "Electrical Materials", "2.5mm Twin & Earth Copper Cable, 4mm Armoured Cable, Conduit Pipes", "Credit 30 Days");
-            Supplier orangeElectric = new Supplier("SUP006", "Orange Electric", "Dhammika Weerasinghe", "+94 11 452 0300", "support@orange.lk", "Meegoda, Homagama", "Electrical Materials", "13A Modular Wall Socket & Switch, MCB Distribution Boxes, LED Floodlights", "Net 30 Days");
-            Supplier duluxPaints = new Supplier("SUP007", "Dulux Paints (AkzoNobel)", "Chathura Dias", "+94 11 476 1111", "dulux.orders@akzonobel.com", "Welisara, Ragama", "Finishing & Paint", "Weather-Shield Exterior Acrylic Paint, Interior Emulsion, Wall Putty, Primer", "Net 30 Days");
-            Supplier rocellCeramics = new Supplier("SUP008", "Rocell Ceramics PLC", "Pradeep Senaratne", "+94 11 479 9400", "commercial@rocell.com", "Rocell Floor, Nawala Road, Rajagiriya", "Finishing & Paint", "Porcelain Glazed Floor Tiles (60x60cm), Ceramic Wall Tiles, Grout & Tile Adhesive", "50% Advance");
-
-            supplierRepository.saveAll(List.of(tokyo, kelaniBricks, mahaweliSand, lanwaSteel, kelaniCables, orangeElectric, duluxPaints, rocellCeramics));
+        // Suppliers are registered and managed directly by the Inventory Manager from the frontend UI.
+        // Clean up legacy auto-seeded demo suppliers if present.
+        List<String> legacySeededCodes = List.of("SUP001", "SUP002", "SUP003", "SUP004", "SUP005", "SUP006", "SUP007", "SUP008");
+        for (String code : legacySeededCodes) {
+            supplierRepository.findBySupplierCodeIgnoreCase(code).ifPresent(supplierRepository::delete);
         }
     }
 
@@ -570,7 +564,25 @@ public class InventoryService {
         return generateSupplierCode();
     }
 
+    private void validateSupplierData(Supplier supplier) {
+        if (supplier.getName() == null || supplier.getName().trim().length() < 2) {
+            throw new BadRequestException("Supplier name must be at least 2 characters long.");
+        }
+        if (supplier.getPhone() == null || !supplier.getPhone().trim().matches("^[0-9+() -]{7,20}$")) {
+            throw new BadRequestException("A valid phone number (7-20 digits/symbols) is required.");
+        }
+        if (supplier.getEmail() != null && !supplier.getEmail().isBlank()) {
+            if (!supplier.getEmail().trim().matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) {
+                throw new BadRequestException("Please provide a valid corporate email address.");
+            }
+        }
+        if (supplier.getContactPerson() != null && !supplier.getContactPerson().isBlank() && supplier.getContactPerson().trim().length() < 2) {
+            throw new BadRequestException("Contact person name must be at least 2 characters.");
+        }
+    }
+
     public Supplier createSupplier(Supplier supplier) {
+        validateSupplierData(supplier);
         if (supplier.getSupplierCode() == null || supplier.getSupplierCode().isBlank()) {
             supplier.setSupplierCode(generateSupplierCode());
         } else if (supplierRepository.existsBySupplierCodeIgnoreCase(supplier.getSupplierCode())) {
@@ -595,11 +607,12 @@ public class InventoryService {
     }
 
     public Supplier updateSupplier(Long id, Supplier update) {
+        validateSupplierData(update);
         Supplier existing = getSupplierById(id);
-        existing.setName(update.getName());
-        existing.setContactPerson(update.getContactPerson());
-        existing.setPhone(update.getPhone());
-        existing.setEmail(update.getEmail());
+        existing.setName(update.getName().trim());
+        existing.setContactPerson(update.getContactPerson() != null ? update.getContactPerson().trim() : null);
+        existing.setPhone(update.getPhone().trim());
+        existing.setEmail(update.getEmail() != null ? update.getEmail().trim() : null);
         existing.setAddress(update.getAddress());
         existing.setCategory(update.getCategory());
         existing.setSuppliedItems(update.getSuppliedItems());

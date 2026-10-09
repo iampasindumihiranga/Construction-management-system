@@ -8,10 +8,11 @@ import { formatDate } from '../services/api';
 export function buildInquiryThread(inq) {
   if (!inq) return [];
   const initiatedBy = inq.initiatedBy || 'CLIENT';
+  const isManagerInitiated = initiatedBy === 'PROJECT_MANAGER' || initiatedBy === 'CLIENT_MANAGER';
   const opening = {
     key: `opening-${inq.id}`,
-    senderRole: initiatedBy,
-    senderName: initiatedBy === 'CLIENT_MANAGER' ? 'Client Manager' : (inq.client?.name || 'Client'),
+    senderRole: isManagerInitiated ? 'PROJECT_MANAGER' : initiatedBy,
+    senderName: isManagerInitiated ? 'Project Manager' : (inq.client?.name || 'Client'),
     message: inq.message,
     createdAt: inq.createdAt,
   };
@@ -19,23 +20,35 @@ export function buildInquiryThread(inq) {
   const rest = messages.length > 0
     ? messages.map((m) => ({ ...m, key: `msg-${m.id}` }))
     : (inq.response
-      ? [{ key: `legacy-${inq.id}`, senderRole: 'CLIENT_MANAGER', senderName: inq.respondedBy || 'Client Manager', message: inq.response, createdAt: inq.respondedAt }]
+      ? [{ key: `legacy-${inq.id}`, senderRole: 'PROJECT_MANAGER', senderName: inq.respondedBy || 'Project Manager', message: inq.response, createdAt: inq.respondedAt }]
       : []);
-  return [opening, ...rest];
+  const combined = [opening, ...rest];
+  const seen = new Set();
+  const deduped = [];
+  for (const m of combined) {
+    if (!m || !m.message) continue;
+    const key = `${m.senderRole || ''}:::${m.message.trim()}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(m);
+    }
+  }
+  return deduped;
 }
 
 /**
- * Chat-style conversation view.
- * viewerRole: 'CLIENT' | 'CLIENT_MANAGER' — messages sent by the viewer are aligned right.
+ * Chat-style conversation view between Client and Project Manager.
+ * viewerRole: 'CLIENT' | 'PROJECT_MANAGER' | 'CLIENT_MANAGER' — messages sent by the viewer are aligned right.
  */
 export default function InquiryThread({ inquiry, viewerRole }) {
   const thread = buildInquiryThread(inquiry);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', margin: '0.75rem 0' }}>
       {thread.map((m) => {
-        const mine = m.senderRole === viewerRole;
-        const isManager = m.senderRole === 'CLIENT_MANAGER';
-        const label = mine ? 'You' : (isManager ? (m.senderName || 'Client Manager') : (m.senderName || 'Client'));
+        const isManager = m.senderRole === 'PROJECT_MANAGER' || m.senderRole === 'CLIENT_MANAGER';
+        const isViewerManager = viewerRole === 'PROJECT_MANAGER' || viewerRole === 'CLIENT_MANAGER';
+        const mine = (viewerRole === 'CLIENT' && m.senderRole === 'CLIENT') || (isViewerManager && isManager);
+        const label = mine ? 'You' : (isManager ? (m.senderName || 'Project Manager') : (m.senderName || 'Client'));
         return (
           <div key={m.key} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
             <div
@@ -51,7 +64,7 @@ export default function InquiryThread({ inquiry, viewerRole }) {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.25rem' }}>
                 <small style={{ fontWeight: 700, color: isManager ? '#15803d' : '#334155' }}>
-                  {label}{isManager && !mine ? ' (Client Manager)' : ''}
+                  {label}{isManager && !mine ? ' (Project Manager)' : ''}
                 </small>
                 <small style={{ color: '#94a3b8' }}>{m.createdAt ? formatDate(m.createdAt) : ''}</small>
               </div>
